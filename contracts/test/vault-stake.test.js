@@ -77,6 +77,33 @@ describe("Vault369X", () => {
     expect(await vault.totalDeposits()).to.equal(0);
   });
 
+  it("v2: fees pulled by a stranger calling the market directly are still shared out", async () => {
+    const { alice, bob, carol, usdt, market, vault, stake } = await setup();
+    await vault.connect(alice).deposit(E(1000), 0);
+    await stake.connect(bob).stake(E(10_000));
+    await market.connect(carol).buy(0, true, E(10_000), 0);    // 100 protocol fee
+    await market.connect(carol).withdrawProtocolFees();         // anyone can push fees into the vault
+    expect(F(await vault.pendingFees())).to.be.closeTo(100, 1e-9);
+    const [, pending] = await vault.depositsOf(alice);
+    expect(F(pending[0])).to.be.closeTo(80, 1e-6);
+    const a0 = await usdt.balanceOf(alice);
+    await vault.connect(alice).withdraw(0);
+    expect(F(await usdt.balanceOf(alice) - a0)).to.be.closeTo(1080, 1e-6);
+    expect(F(await stake.pendingFees(bob.address))).to.be.closeTo(20, 1e-6);
+    expect(await vault.accounted()).to.be.lessThan(1000n);     // only rounding dust left
+  });
+
+  it("v2: slashed bonds sent to the vault can be moved out by the owner", async () => {
+    const { owner, alice, x, usdt, market, vault } = await setup();
+    await jump(10 * DAY);
+    await market.resolve(0, true, true);                       // slash the creator's bond -> vault
+    expect(await x.balanceOf(vault)).to.equal(E(1000));
+    await expect(vault.connect(alice).sweepOther(x, alice.address, E(1000))).to.be.reverted;
+    await expect(vault.sweepOther(usdt, owner.address, 1n)).to.be.revertedWith("Not USDT");
+    await vault.sweepOther(x, owner.address, E(1000));
+    expect(await x.balanceOf(vault)).to.equal(0n);
+  });
+
   it("with no depositors, all fees go to stakers", async () => {
     const { carol, usdt, market, vault, stake } = await setup();
     await market.connect(carol).buy(0, true, E(1000), 0);
@@ -101,6 +128,7 @@ describe("Stake369X", () => {
 
   it("voting resolves the market; winners redeem, correct voters earn 1%", async () => {
     const { alice, bob, carol, x, market, stake } = await setup();
+    await stake.setVoteReward(100);                            // off by default in v2
     await market.connect(carol).buy(0, true, E(1000), 0);
     const carolShares = await market.yesShares(0, carol);
     await stake.connect(alice).stake(E(30_000));
@@ -137,7 +165,65 @@ describe("Stake369X", () => {
     await stake.finalize(0);
     const t = await stake.tallies(0);
     expect(t.finalized).to.equal(true); expect(t.outcomeYes).to.equal(false);
-    await stake.connect(alice).claimVoteReward(0);
+    await expect(stake.connect(alice).claimVoteReward(0)).to.be.revertedWith("Too few votes for rewards");
+  });
+
+  it("v2: too few votes can't settle a market; the owner settles it", async () => {
+    const { owner, alice, bob, market, stake } = await setup();
+    await stake.connect(alice).stake(E(5000));                 // below the 10,000 minimum
+    await stake.connect(bob).stake(E(95_000));                 // quorum = 10% of 100,000 = 10,000
+    expect(F(await stake.quorum())).to.equal(10_000);
+    await jump(10 * DAY);
+    await stake.connect(alice).vote(0, true);
+    await jump(2 * DAY);
+    await expect(stake.finalize(0)).to.be.revertedWith("Not enough votes: the owner settles this market");
+    await market.connect(owner).resolve(0, false, false);
+    await stake.finalize(0);
+    expect((await stake.tallies(0)).outcomeYes).to.equal(false);
+    expect(await stake.turnoutMet(0)).to.equal(false);
+  });
+
+  it("v2: the market creator never earns a voting reward on their own market", async () => {
+    const { owner, alice, x, market, stake } = await setup();
+    await stake.setVoteReward(100);
+    const now = (await ethers.provider.getBlock("latest")).timestamp;
+    await market.connect(alice).createMarket("Will alice farm voting rewards on this?", "test source", now + 2 * DAY, E(0.5));
+    await stake.connect(alice).stake(E(50_000));
+    await x.approve(stake, ethers.MaxUint256); await stake.connect(owner).stake(E(50_000));
+    await jump(3 * DAY);
+    await stake.connect(alice).vote(1, true);
+    await stake.connect(owner).vote(1, true);
+    await jump(2 * DAY);
+    await stake.finalize(1);
+    await expect(stake.connect(alice).claimVoteReward(1)).to.be.revertedWith("No reward on your own market");
+    const o0 = await x.balanceOf(owner);
+    await stake.connect(owner).claimVoteReward(1);
+    expect(await x.balanceOf(owner) - o0).to.equal(E(500));
+  });
+
+  it("v2: fees that arrive while nobody is staked don't go to the first staker", async () => {
+    const { owner, alice, carol, usdt, market, vault, stake } = await setup();
+    await market.connect(carol).buy(0, true, E(10_000), 0);    // 100 protocol fee, no depositors: all to staking
+    await vault.harvest();
+    await stake.connect(alice).stake(E(10_000));
+    expect(F(await stake.pendingFees(alice.address))).to.equal(0);
+    expect(F(await stake.unallocated())).to.be.closeTo(100, 1e-9);
+    await expect(stake.connect(alice).sweepUnallocated(alice.address)).to.be.reverted;
+    const b0 = await usdt.balanceOf(owner);
+    await stake.sweepUnallocated(owner.address);
+    expect(F(await usdt.balanceOf(owner) - b0)).to.be.closeTo(100, 1e-9);
+    await market.connect(carol).buy(0, true, E(10_000), 0);    // later fees go to the staker
+    await vault.harvest();
+    expect(F(await stake.pendingFees(alice.address))).to.be.closeTo(100, 1e-6);
+  });
+
+  it("v2: the reward pool can be withdrawn by the owner, but never anyone's stake", async () => {
+    const { owner, alice, x, stake } = await setup();
+    await stake.connect(alice).stake(E(10_000));
+    await expect(stake.withdrawRewardPool(E(1_000_001), owner.address)).to.be.revertedWith("More than the reward pool");
+    await stake.withdrawRewardPool(E(1_000_000), owner.address);
+    expect(await stake.rewardPool()).to.equal(0n);
+    expect(await x.balanceOf(stake)).to.equal(E(10_000));
   });
 
   it("only the owner can change settings; nobody else can resolve the market", async () => {

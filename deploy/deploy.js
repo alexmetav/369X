@@ -26,6 +26,7 @@
   const C = CONFIG.CONTRACTS || {};
   const PHASE2 = !!C.market && !(C.vault && C.staking);   // core contracts exist: add the vault + staking
   const PHASE3 = !!(C.vault && C.staking) && !C.referral;  // then: add the referral program
+  let UPGRADE = false;                                     // all live, but vault + staking are still v1: upgrade them
   const REF_POOL = 100_000;
   const REWARD_POOL = 1_000_000;
 
@@ -33,7 +34,7 @@
     const t = $("#toast"); t.textContent = msg; t.style.color = bad ? "var(--no)" : "";
     t.classList.add("show"); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("show"), 3500);
   }
-  const key = () => `369x:deploy${PHASE3 ? "3" : PHASE2 ? "2" : ""}:${chainId}:${me}`;
+  const key = () => `369x:deploy${UPGRADE ? "4" : PHASE3 ? "3" : PHASE2 ? "2" : ""}:${chainId}:${me}`;
   const load = () => { try{ return JSON.parse(localStorage.getItem(key())) || { done: {} }; }catch(e){ return { done: {} }; } };
   const save = (s) => { try{ localStorage.setItem(key(), JSON.stringify(s)); }catch(e){} };
 
@@ -70,7 +71,19 @@
       { id: "pool", label: `Fund the referral reward pool (${REF_POOL.toLocaleString()} tUSDT)`, run: async (s) => send(token(C.usdt), "transfer", [s.referral, E(REF_POOL)]) }
     ];
   }
+  // stage 4: replace vault + staking with v2 and point the market at them (one run, 6 confirmations)
+  function steps4(){
+    return [
+      { id: "harvest", label: "Pay out the fees waiting in the old vault (to its depositors and stakers)", run: async () => send(vault(C.vault), "harvest", []) },
+      { id: "vault", label: "Create the new vault (v2)", run: async (s) => { const r = await deployContract("Vault369X", [C.usdt, C.market]); s.vault = r.address; return r; } },
+      { id: "stake", label: "Create the new staking contract (v2, with minimum turnout)", run: async (s) => { const r = await deployContract("Stake369X", [C.token, C.usdt, C.market]); s.staking = r.address; return r; } },
+      { id: "link", label: "Tell the new vault where the stakers' 20% of fees goes", run: async (s) => send(vault(s.vault), "setStaking", [s.staking]) },
+      { id: "fees", label: "Send the market's protocol fees to the new vault", run: async (s) => send(market(C.market), "setFeeRecipient", [s.vault]) },
+      { id: "resolver", label: "Let the new staking contract settle markets", run: async (s) => send(market(C.market), "setResolver", [s.staking]) }
+    ];
+  }
   function steps(seed){
+    if(UPGRADE) return steps4();
     if(PHASE3) return steps3();
     if(PHASE2) return steps2();
     const list = [
@@ -97,6 +110,11 @@
     const all = list.every(st => state.done[st.id]);
     $("#reset").hidden = all;                 // nothing to restart once everything is deployed
     $("#go").hidden = all;
+    if(UPGRADE){
+      $("#resultBox").hidden = !state.vault;
+      if(state.vault) $("#result").textContent = JSON.stringify({ network: CONFIG.CHAIN.chainName, chainId: Number(chainId), upgrade: "v2", vault: state.vault, staking: state.staking || null, oldVault: C.vault, oldStaking: C.staking, complete: all }, null, 2);
+      return;
+    }
     if(PHASE3){
       $("#resultBox").hidden = !state.referral;
       if(state.referral) $("#result").textContent = JSON.stringify({ network: CONFIG.CHAIN.chainName, chainId: Number(chainId), referral: state.referral, complete: all }, null, 2);
@@ -133,7 +151,7 @@
     const bal = Number(ethers.formatEther(await provider.getBalance(me)));
     $("#who").innerHTML = `Connected with <b>${walletName}</b>: <b>${me.slice(0, 6)}…${me.slice(-4)}</b> on ${CONFIG.CHAIN.chainName} · Balance <b>${bal.toFixed(4)} tBNB</b>` +
       (bal < 0.05 ? ` · <span style="color:var(--no)">You need about 0.05 tBNB. Use the faucet button.</span>` : "");
-    if((PHASE2 || PHASE3) && me.toLowerCase() !== String(C.owner).toLowerCase())
+    if((PHASE2 || PHASE3 || UPGRADE) && me.toLowerCase() !== String(C.owner).toLowerCase())
       return toast(`Connect with the wallet that owns the market (${C.owner.slice(0, 6)}…${C.owner.slice(-4)}). Switch account in MetaMask.`, true);
     $("#go").disabled = false;
     render(load(), steps($("#seed").checked));
@@ -159,7 +177,7 @@
     toast("All done. Copy the addresses below and send them to Claude.");
   }
 
-  if(C.vault && C.staking && C.referral){
+  function showLive(){
     // everything is live: show the addresses, no deploy buttons
     document.querySelector("h1").textContent = "All 369X contracts are live";
     document.querySelector(".lede").innerHTML = "Nothing to deploy. These are the contracts your website uses on " + CONFIG.CHAIN.chainName + ".";
@@ -167,7 +185,31 @@
     const box = document.createElement("div"); box.className = "panel pad"; box.style.marginTop = "24px";
     box.innerHTML = ["usdt", "token", "market", "vault", "staking", "referral"].map(k => `<div class="bal-row"><span>${k}</span><a style="color:var(--cyan)" target="_blank" rel="noopener" href="${explorer}/address/${C[k]}">${C[k]}</a></div>`).join("");
     document.querySelector("main").appendChild(box);
-    return;
+  }
+  async function isV2(){
+    for(const url of CONFIG.READ_RPCS){
+      try{
+        const p = new ethers.JsonRpcProvider(url, Number(CONFIG.CHAIN.chainId), { staticNetwork: true });
+        const code = await p.getCode(C.staking);
+        if(code === "0x") return true;                       // not readable: don't offer an upgrade
+        try{ await new ethers.Contract(C.staking, ["function quorum() view returns (uint256)"], p).quorum(); return true; }
+        catch(e){ if(e.code === "CALL_EXCEPTION") return false; throw e; }
+      }catch(e){ /* next RPC */ }
+    }
+    return true;
+  }
+  if(C.vault && C.staking && C.referral){
+    $("#seed").closest("label").hidden = true;
+    document.querySelector("h1").textContent = "Checking your contracts…";
+    $("#connect").disabled = true;                            // wait until we know what this page should do
+    isV2().then(v2 => {
+      if(v2) return showLive();
+      UPGRADE = true; $("#connect").disabled = false;
+      document.querySelector("h1").textContent = "Upgrade the vault and staking (v2)";
+      document.querySelector(".lede").innerHTML = "One run, about <b>6 MetaMask confirmations</b> (free test BNB). Your markets, trades, tokens and referral program stay exactly as they are. " +
+        "The new versions add a <b>minimum voter turnout</b>, make sure <b>fees can never get stuck</b> in the vault, stop the <b>first staker</b> from taking fees earned before they joined, and let you recover <b>slashed bonds</b>. " +
+        "Old deposits and stakes stay safe in the old contracts; the website shows everyone a button to withdraw them.";
+    });
   }
   if(PHASE3){
     document.querySelector("h1").textContent = "Add the referral program";

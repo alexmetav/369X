@@ -11,10 +11,14 @@ interface IFeeSource {
     function protocolFees() external view returns (uint256);
 }
 
-/// @title Vault369X
+/// @title Vault369X (v2)
 /// @notice Liquidity vault. Depositors lock test USDT and earn 80% of the market's
 ///         protocol fees (pro rata to principal). The other 20% goes to stakers.
 ///         Longer locks earn points faster (1x / 2x / 4x / 8x).
+///         v2: fees are counted from the vault's balance, so USDT that arrives any
+///         other way (e.g. someone calls the market's withdrawProtocolFees directly)
+///         is still shared out instead of getting stuck; other tokens sent here
+///         (slashed market bonds) can be moved out by the owner.
 ///         TESTNET VERSION: not audited. Do not use with real money.
 contract Vault369X is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
@@ -42,6 +46,7 @@ contract Vault369X is Ownable, ReentrancyGuard {
     uint256 public totalFeesToLps;
     uint256 public totalFeesToStakers;
     uint256 public immutable startTime;
+    uint256 public accounted;                // USDT here that belongs to depositors (principal + unpaid fees)
 
     mapping(address => Deposit[]) private _deposits;
     mapping(address => uint256) public settledPoints;   // points from closed deposits
@@ -59,15 +64,15 @@ contract Vault369X is Ownable, ReentrancyGuard {
 
     /// @notice Pull protocol fees from the market and split them. Anyone can call.
     function harvest() public {
-        uint256 before = usdt.balanceOf(address(this));
         if (market.protocolFees() > 0) {
             try market.withdrawProtocolFees() {} catch {}
         }
-        uint256 got = usdt.balanceOf(address(this)) - before;
-        if (got == 0) return;
+        uint256 bal = usdt.balanceOf(address(this));
+        if (bal <= accounted) return;
+        uint256 got = bal - accounted;       // everything new, however it arrived
         uint256 toLps = totalDeposits > 0 ? got * lpShareBps / 10_000 : 0;
         uint256 toStakers = got - toLps;
-        if (toLps > 0) { accPerShare += toLps * ACC / totalDeposits; totalFeesToLps += toLps; }
+        if (toLps > 0) { accPerShare += toLps * ACC / totalDeposits; totalFeesToLps += toLps; accounted += toLps; }
         if (toStakers > 0) {
             if (staking != address(0)) { usdt.safeTransfer(staking, toStakers); totalFeesToStakers += toStakers; }
             else { usdt.safeTransfer(owner(), toStakers); }
@@ -80,6 +85,7 @@ contract Vault369X is Ownable, ReentrancyGuard {
         require(lock < 4, "Bad lock");
         harvest();                                   // earlier fees belong to earlier depositors
         usdt.safeTransferFrom(msg.sender, address(this), amount);
+        accounted += amount;
         uint64 unlock = uint64(block.timestamp + uint256(lockDays[lock]) * 1 days);
         _deposits[msg.sender].push(Deposit(uint128(amount), uint64(block.timestamp), unlock, lock, false, amount * accPerShare / ACC));
         totalDeposits += amount;
@@ -93,6 +99,7 @@ contract Vault369X is Ownable, ReentrancyGuard {
         uint256 fees = _pending(d);
         require(fees > 0, "Nothing to claim");
         d.debt = uint256(d.amount) * accPerShare / ACC;
+        accounted -= fees;
         usdt.safeTransfer(msg.sender, fees);
         emit Claimed(msg.sender, index, fees);
     }
@@ -106,6 +113,7 @@ contract Vault369X is Ownable, ReentrancyGuard {
         settledPoints[msg.sender] += _points(d, block.timestamp);
         d.closed = true;
         totalDeposits -= amount;
+        accounted -= amount + fees;
         usdt.safeTransfer(msg.sender, amount + fees);
         emit Withdrawn(msg.sender, index, amount, fees);
     }
@@ -127,10 +135,20 @@ contract Vault369X is Ownable, ReentrancyGuard {
         for (uint256 i = 0; i < list.length; i++) if (!list[i].closed) pts += _points(list[i], block.timestamp);
     }
 
-    function pendingFees() external view returns (uint256) { return market.protocolFees(); }
+    /// @notice fees waiting to be shared out (in the market, or already here but not yet counted)
+    function pendingFees() public view returns (uint256) {
+        uint256 bal = usdt.balanceOf(address(this));
+        return market.protocolFees() + (bal > accounted ? bal - accounted : 0);
+    }
 
     // ------------------------------------------------------------------ admin
     function setStaking(address s) external onlyOwner { staking = s; }
+
+    /// @notice move out tokens other than USDT that ended up here (e.g. slashed $369X market bonds)
+    function sweepOther(IERC20 t, address to, uint256 amount) external onlyOwner {
+        require(address(t) != address(usdt), "Not USDT");
+        t.safeTransfer(to, amount);
+    }
 
     function setLpShare(uint256 bps) external onlyOwner {
         require(bps <= 10_000, "Too high");
@@ -154,6 +172,6 @@ contract Vault369X is Ownable, ReentrancyGuard {
 
     function _unharvestedPerShare() internal view returns (uint256) {
         if (totalDeposits == 0) return 0;
-        return market.protocolFees() * lpShareBps / 10_000 * ACC / totalDeposits;
+        return pendingFees() * lpShareBps / 10_000 * ACC / totalDeposits;
     }
 }

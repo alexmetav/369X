@@ -51,7 +51,9 @@ const VAULT_ABI = [
   "function totalFeesToLps() view returns (uint256)",
   "function pendingFees() view returns (uint256)",
   "function lpShareBps() view returns (uint256)",
-  "function startTime() view returns (uint256)"
+  "function startTime() view returns (uint256)",
+  "function accounted() view returns (uint256)",
+  "function sweepOther(address,address,uint256)"
 ];
 const STAKE_ABI = [
   "function stake(uint256)",
@@ -67,6 +69,11 @@ const STAKE_ABI = [
   "function votingPeriod() view returns (uint256)",
   "function voteRewardBps() view returns (uint256)",
   "function setVoteReward(uint256)",
+  "function quorum() view returns (uint256)",
+  "function turnoutMet(uint256) view returns (bool)",
+  "function unallocated() view returns (uint256)",
+  "function sweepUnallocated(address)",
+  "function withdrawRewardPool(uint256,address)",
   "function rewardPool() view returns (uint256)",
   "function tallies(uint256) view returns (uint256 yes, uint256 no, bool finalized, bool outcomeYes)",
   "function voteOf(uint256,address) view returns (tuple(bool voted,bool yes,bool claimed,uint256 weight))"
@@ -88,6 +95,8 @@ const REFERRAL_ABI = [
   "event CodeRegistered(address indexed user, string code)",
   "event ReferrerSet(address indexed user, address indexed referrer, string code)"
 ];
+// vault + staking from before the v2 upgrade: people can still withdraw from them
+const OLD = () => CONFIG.CONTRACTS_OLD || {};
 const HAS_VAULT = () => !!CONFIG.CONTRACTS?.vault, HAS_STAKING = () => !!CONFIG.CONTRACTS?.staking, HAS_REFERRAL = () => !!CONFIG.CONTRACTS?.referral;
 const LOCK_IDS = ["flex", "d90", "d180", "d365"];
 const MULTICALL = "0xcA11bde05977b3631167028862bE2a173976CA11";   // Multicall3: same address on almost every EVM chain
@@ -105,7 +114,7 @@ async function pool(tasks, n = 6){
 
 const Chain = {
   read: null, rpcIdx: 0, mcOk: null, data: null, scanning: null, mkCache: null, mkLoading: null,
-  clock: null, votingPeriod: null, voteRewardBps: null, cacheFull: false,
+  clock: null, votingPeriod: null, voteRewardBps: null, quorum: undefined, cacheFull: false,
   fmt: (x) => Number(ethers.formatEther(x)),
   now: () => Chain.clock ? Chain.clock.chain + (Date.now() - Chain.clock.local) : Date.now(),
   wei: (n) => ethers.parseEther((Math.floor(Number(n) * 1e6) / 1e6).toFixed(6)),
@@ -315,8 +324,10 @@ function mapChainMarket(id, m, priceYes, ev){
 
 async function stakingParams(st){
   if(Chain.votingPeriod === null){
-    const [vp, rb] = await Promise.all([st.votingPeriod(), st.voteRewardBps()]);
+    const [vp, rb, q] = await Chain.multi([{ c: st, fn: "votingPeriod" }, { c: st, fn: "voteRewardBps" }, { c: st, fn: "quorum" }]);
+    if(vp === null || rb === null) throw new Error("Couldn't read staking settings");
     Chain.votingPeriod = Number(vp) * 1000; Chain.voteRewardBps = Number(rb);
+    Chain.quorum = q === null ? null : Chain.fmt(q);          // null: staking v1 (no minimum turnout)
   }
 }
 
@@ -332,8 +343,8 @@ async function loadChainMarkets(){
     if(HAS_STAKING()){
       const st = await Chain.staking(); await stakingParams(st);
       const ended = list.filter(m => m.status !== "live");
-      const tallies = await Chain.multi(ended.map(m => ({ c: st, fn: "tallies", args: [Number(m.id)] })));
-      ended.forEach((m, i) => { const t = tallies[i]; if(!t) return; m.votes = { YES: Chain.fmt(t[0]), NO: Chain.fmt(t[1]) }; m.finalized = t[2]; m.voteEnds = m.endMs + Chain.votingPeriod; });
+      const res = await Chain.multi(ended.flatMap(m => [{ c: st, fn: "tallies", args: [Number(m.id)] }, { c: st, fn: "turnoutMet", args: [Number(m.id)] }]));
+      ended.forEach((m, i) => { const t = res[2 * i]; if(!t) return; m.votes = { YES: Chain.fmt(t[0]), NO: Chain.fmt(t[1]) }; m.finalized = t[2]; m.turnoutMet = res[2 * i + 1]; m.voteEnds = m.endMs + Chain.votingPeriod; });
     }
     Chain.mkCache = { list, at: Date.now() };
     return list;
@@ -448,8 +459,9 @@ if(CHAIN_ON){
         const out = mapChainMarket(i, m, p, h.events);
         if(HAS_STAKING() && out.status !== "live"){
           const st = await Chain.staking(); await stakingParams(st);
-          const t = await st.tallies(i);
-          out.votes = { YES: Chain.fmt(t.yes), NO: Chain.fmt(t.no) }; out.finalized = t.finalized; out.voteEnds = out.endMs + Chain.votingPeriod;
+          const [t, tm] = await Chain.multi([{ c: st, fn: "tallies", args: [i] }, { c: st, fn: "turnoutMet", args: [i] }]);
+          if(!t) throw new Error("Couldn't read the vote");
+          out.votes = { YES: Chain.fmt(t[0]), NO: Chain.fmt(t[1]) }; out.finalized = t[2]; out.turnoutMet = tm; out.voteEnds = out.endMs + Chain.votingPeriod;
         }
         return out;
       });
@@ -627,15 +639,17 @@ if(CHAIN_ON){
       const [r, markets] = await Promise.all([Chain.multi([
         { c: mk, fn: "reserve" }, { c: mk, fn: "bondAmount" }, { c: mk, fn: "protocolFees" }, { c: mk, fn: "defaultB" }, { c: mk, fn: "resolver" },
         { c: st, fn: "voteRewardBps" }, { c: st, fn: "votingPeriod" }, { c: st, fn: "totalStaked" }, { c: st, fn: "staked", args: [owner] },
-        { c: st, fn: "rewardPool" }, { c: tk, fn: "balanceOf", args: [owner] }, { c: st, fn: "lockedUntil", args: [owner] }
+        { c: st, fn: "rewardPool" }, { c: tk, fn: "balanceOf", args: [owner] }, { c: st, fn: "lockedUntil", args: [owner] },
+        { c: st, fn: "quorum" }, { c: st, fn: "unallocated" }, { c: tk, fn: "balanceOf", args: [C.vault] }
       ]), loadChainMarkets()]);
-      if(r.some(x => x === null)) throw new Error("Couldn't read the contract settings");
-      const [reserve, bond, fees, b, resolver, rewardBps, period, total, ownerStake, rewardPool, ownerTokens, ownerLock] = r;
+      if(r.slice(0, 12).some(x => x === null)) throw new Error("Couldn't read the contract settings");
+      const [reserve, bond, fees, b, resolver, rewardBps, period, total, ownerStake, rewardPool, ownerTokens, ownerLock, quorum, unalloc, slashed] = r;
       const pending = markets.filter(m => m.status === "resolving" && !m.finalized);
       const ownerVotes = await Chain.multi(pending.map(m => ({ c: st, fn: "voteOf", args: [Number(m.id), owner] })));
       const now = Chain.now(), F = Chain.fmt;
       return {
         owner, resolverIsStaking: resolver.toLowerCase() === C.staking.toLowerCase(),
+        v2: quorum !== null, quorum: quorum === null ? 0 : F(quorum), unallocated: unalloc === null ? 0 : F(unalloc), slashedBonds: slashed === null ? 0 : F(slashed),
         reserve: F(reserve), bond: F(bond), unharvested: F(fees), b: F(b),
         // worst-case reserve one new market can lock: b * ln(1 / 0.05) at a 5% / 95% start price
         perMarketMax: F(b) * Math.log(20),
@@ -645,6 +659,37 @@ if(CHAIN_ON){
           ownerVote: ownerVotes[i]?.voted ? (ownerVotes[i].yes ? "YES" : "NO") : null }))
       };
     },
+    async sweepUnallocated(){ await Chain.write(CONFIG.CONTRACTS.staking, STAKE_ABI, "sweepUnallocated", [wallet.address]); return { ok: true }; },
+    async sweepSlashedBonds(){
+      const tk = await Chain.token(CONFIG.CONTRACTS.token), amt = await Chain.retry(() => tk.balanceOf(CONFIG.CONTRACTS.vault));
+      if(amt === 0n) throw new Error("No bonds to recover");
+      await Chain.write(CONFIG.CONTRACTS.vault, VAULT_ABI, "sweepOther", [CONFIG.CONTRACTS.token, wallet.address, amt]);
+      return { ok: true, amount: Chain.fmt(amt) };
+    },
+    // ---- money left in the pre-v2 vault / staking contracts ----
+    async getOld(w){
+      const O = OLD(); if(!w || !(O.vault || O.staking)) return null;
+      const calls = [];
+      const v = O.vault ? new ethers.Contract(O.vault, VAULT_ABI, await Chain.readProvider()) : null;
+      const st = O.staking ? new ethers.Contract(O.staking, STAKE_ABI, await Chain.readProvider()) : null;
+      if(v) calls.push({ c: v, fn: "depositsOf", args: [w] });
+      if(st) calls.push({ c: st, fn: "staked", args: [w] }, { c: st, fn: "pendingFees", args: [w] }, { c: st, fn: "lockedUntil", args: [w] });
+      const r = await Chain.retry(() => Chain.multi(calls));
+      const out = { deposits: [], staked: 0, fees: 0, lockedUntil: 0 };
+      let i = 0;
+      if(v){ const dep = r[i++]; if(dep){ const [list, pending] = dep;
+        out.deposits = list.map((d, k) => ({ id: String(k), amount: Chain.fmt(d.amount), earned: Chain.fmt(pending[k]), unlock: Number(d.unlock) * 1000, closed: d.closed })).filter(d => !d.closed); } }
+      if(st){ out.staked = Chain.fmt(r[i] || 0n); out.fees = Chain.fmt(r[i + 1] || 0n); out.lockedUntil = Number(r[i + 2] || 0n) * 1000; }
+      out.any = out.deposits.length > 0 || out.staked > 0 || out.fees > 0.000001;
+      return out;
+    },
+    async oldWithdraw({ id }){ await Chain.write(OLD().vault, VAULT_ABI, "withdraw", [Number(id)]); return { ok: true }; },
+    async oldUnstake(){
+      const st = new ethers.Contract(OLD().staking, STAKE_ABI, await Chain.readProvider());
+      const amt = await Chain.retry(() => st.staked(wallet.address)); if(amt === 0n) throw new Error("Nothing staked in the old contract");
+      await Chain.write(OLD().staking, STAKE_ABI, "unstake", [amt]); return { ok: true, amount: Chain.fmt(amt) };
+    },
+    async oldClaimStakeFees(){ await Chain.write(OLD().staking, STAKE_ABI, "claimFees", []); return { ok: true }; },
     async setVoteReward(bps){ await Chain.write(CONFIG.CONTRACTS.staking, STAKE_ABI, "setVoteReward", [bps]); Chain.voteRewardBps = null; Chain.votingPeriod = null; return { ok: true }; },
     async setBond(amount){ await Chain.write(CONFIG.CONTRACTS.market, MARKET_ABI, "setBondAmount", [Chain.wei(amount)]); return { ok: true }; },
     async fundReserve(amount){

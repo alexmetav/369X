@@ -268,6 +268,10 @@ function feedRows(m){
 const nowMs = () => (typeof CHAIN_ON !== "undefined" && CHAIN_ON) ? Chain.now() : Date.now();
 function chainVoteBox(m){
   const tot = m.votes.YES + m.votes.NO, my = ACC?.votes?.[m.id], open = nowMs() < (m.voteEnds || 0);
+  const Q = Chain.quorum, enough = !Q || tot >= Q;                 // Q null/0: staking v1, no minimum turnout
+  const mine = (ACC?.address || "").toLowerCase() === (m.creator || "").toLowerCase();
+  const rewardOk = Chain.voteRewardBps > 0 && m.turnoutMet !== false && !mine;
+  const quorumLine = Q ? `<p class="side-note">Needs at least <b class="num">${compactN(Q)}</b> ${T()} of votes to be settled by vote${tot ? ` (now ${compactN(tot)})` : ""}. Otherwise the admin settles it.</p>` : "";
   const bar = `<div class="bar" style="margin-top:16px"><i style="width:${tot ? (m.votes.YES / tot * 100).toFixed(1) : 50}%"></i></div>
     <div class="mfoot"><span class="num">YES ${compactN(m.votes.YES)}${tot ? " (" + pct(m.votes.YES / tot) + ")" : ""}</span><span class="num">NO ${compactN(m.votes.NO)}</span></div>`;
   const admin = ACC?.isAdmin && m.status === "resolving" ? `<details style="margin-top:12px"><summary class="muted" style="cursor:pointer;font-size:13px">Admin: settle now without waiting</summary>
@@ -278,18 +282,18 @@ function chainVoteBox(m){
       <b style="display:block;font-family:var(--display);font-size:40px;font-weight:500;margin-top:10px" class="${m.outcome === "YES" ? "pos" : "neg"}">${esc(m.outcome)}</b>
       <p class="muted">Winning shares pay 1 ${S()} each. Redeem them from your portfolio.</p>${tot ? bar : ""}
       ${my ? `<div class="info">You voted <b>${esc(my.side)}</b> with ${tok(my.weight)}.</div>` : ""}
-      ${won && !m.finalized ? `<button class="btn btn-ghost" style="width:100%;margin-top:12px" data-act="finalize" data-id="${esc(m.id)}">Record result to unlock your reward</button>` : ""}
-      ${won && m.finalized && !my.claimed ? `<button class="btn btn-grad" style="width:100%;margin-top:12px" data-act="claimVote" data-id="${esc(m.id)}">Claim ${tok(my.weight * (Chain.voteRewardBps ?? 100) / 10000)} reward</button>` : ""}
+      ${won && !m.finalized && rewardOk ? `<button class="btn btn-ghost" style="width:100%;margin-top:12px" data-act="finalize" data-id="${esc(m.id)}">Record result to unlock your reward</button>` : ""}
+      ${won && m.finalized && !my.claimed && rewardOk ? `<button class="btn btn-grad" style="width:100%;margin-top:12px" data-act="claimVote" data-id="${esc(m.id)}">Claim ${tok(my.weight * (Chain.voteRewardBps ?? 100) / 10000)} reward</button>` : ""}
       ${won && my.claimed ? `<p class="side-note">Reward claimed.</p>` : ""}</div>`;
   }
   return `<div class="panel pad"><h2 class="h3">Vote on the result</h2>
-    <p class="muted" style="margin-top:6px">Trading has ended. ${T()} stakers vote using <b>${esc(m.source)}</b>. ${open ? "Voting closes " + new Date(m.voteEnds).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) + "." : "Voting has closed."} ${Chain.voteRewardBps ? `Correct voters earn ${(Chain.voteRewardBps / 100).toString()}% of their stake.` : ""}</p>
-    ${bar}
+    <p class="muted" style="margin-top:6px">Trading has ended. ${T()} stakers vote using <b>${esc(m.source)}</b>. ${open ? "Voting closes " + new Date(m.voteEnds).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) + "." : "Voting has closed."} ${Chain.voteRewardBps ? `Correct voters earn ${(Chain.voteRewardBps / 100).toString()}% of their stake${mine ? " (not on your own market)" : ""}.` : ""}</p>
+    ${bar}${quorumLine}
     ${my ? `<div class="info">You voted <b>${esc(my.side)}</b> with ${tok(my.weight)}.</div>`
       : open ? (ACC?.staked > 0 ? `<div class="yn"><button class="yes" data-act="vote" data-id="${esc(m.id)}" data-side="YES"><span>Vote YES</span></button><button class="no" data-act="vote" data-id="${esc(m.id)}" data-side="NO"><span>Vote NO</span></button></div>`
         : `<div class="info"><a href="#/stake" style="color:var(--cyan)">Stake ${T()}</a> to vote on this result.</div>`) : ""}
-    ${!open && tot > 0 ? `<button class="btn btn-grad" style="width:100%;margin-top:12px" data-act="finalize" data-id="${esc(m.id)}">Finalize result</button>` : ""}
-    ${!open && tot === 0 ? `<p class="side-note">Nobody voted. The admin will settle this market.</p>` : ""}
+    ${!open && tot > 0 && enough ? `<button class="btn btn-grad" style="width:100%;margin-top:12px" data-act="finalize" data-id="${esc(m.id)}">Finalize result</button>` : ""}
+    ${!open && !enough ? `<p class="side-note">${tot ? "Too few votes to settle by vote." : "Nobody voted."} The admin will settle this market.</p>` : ""}
     ${admin}
   </div>`;
 }
@@ -439,12 +443,32 @@ async function pagePortfolio(){
   </div></section>`;
 }
 
+/* ---------- money left in the pre-v2 contracts ---------- */
+async function oldFundsBox(kind){
+  if(!(CHAIN_ON && api.getOld && wallet.address)) return "";
+  const o = await api.getOld(wallet.address).catch(() => null);
+  if(!o || !o.any) return "";
+  const rows = [];
+  if(kind === "vault") o.deposits.forEach(d => rows.push(`<div><span><b class="num" style="color:var(--text)">${money(d.amount, 2)}</b> + ${money(d.earned, 4)} earned<br><small class="muted">${d.unlock > nowMs() ? "Unlocks " + fmtDate(new Date(d.unlock).toISOString()) : "Ready to withdraw"}</small></span>
+    <button class="btn btn-grad btn-sm" data-act="oldWithdraw" data-id="${esc(d.id)}" ${d.unlock > nowMs() ? "disabled style='opacity:.4'" : ""}>Withdraw</button></div>`));
+  if(kind === "stake"){
+    if(o.staked > 0) rows.push(`<div><span><b class="num" style="color:var(--text)">${tok(o.staked)}</b> staked<br><small class="muted">${o.lockedUntil > nowMs() ? "Locked until " + fmtDate(new Date(o.lockedUntil).toISOString()) : "Unstake, then stake again here"}</small></span>
+      <button class="btn btn-grad btn-sm" data-act="oldUnstake" ${o.lockedUntil > nowMs() ? "disabled style='opacity:.4'" : ""}>Unstake</button></div>`);
+    if(o.fees > 0.000001) rows.push(`<div><span><b class="num pos">${money(o.fees, 4)}</b> fees earned</span><button class="btn btn-ghost btn-sm" data-act="oldClaimFees">Claim</button></div>`);
+  }
+  if(!rows.length) return "";
+  return `<div class="panel pad" style="margin-bottom:16px;border-color:rgba(255,200,110,.35)"><h2 class="h3">You have funds in the old ${kind === "vault" ? "vault" : "staking contract"}</h2>
+    <p class="muted" style="margin-top:4px">We upgraded to a safer version. Your money is safe in the old contract; move it whenever you like.</p>
+    <div class="feed" style="margin-top:8px">${rows.join("")}</div></div>`;
+}
+
 /* ---------- vault ---------- */
 async function pageVault(){
   if(CHAIN_ON && !CONFIG.CONTRACTS.vault) return chainSoon("Liquidity vault", "The vault is being moved on-chain. You'll deposit test USDT, choose a lock period for up to 8× points, and earn 80% of protocol fees.");
-  const v = await api.getVault(), a = ACC, L = CONFIG.LOCKS.find(x => x.id === vState.lock);
+  const [v, oldBox] = await Promise.all([api.getVault(), oldFundsBox("vault")]), a = ACC, L = CONFIG.LOCKS.find(x => x.id === vState.lock);
   vState.apy = v.apy;
   return `<section class="page-head"><div class="wrap">
+    ${oldBox}
     ${head("Liquidity vault", `Deposit ${S()} into the protocol vault. Depositors earn ${pct(CONFIG.LP_SHARE)} of protocol fees from every trade, and longer locks earn points faster.`)}
     <div class="stat-grid">
       <div class="panel stat"><small>Total deposited</small><b class="num">${compact(v.tvl)}</b></div>
@@ -483,7 +507,9 @@ function updateVaultSum(){
 async function pageStakeChain(){
   if(wallet.address && !ACC) return connectPrompt("Couldn't load your account from the blockchain. Please refresh in a moment.");
   const a = ACC, isStake = vState.stakeTab === "stake", locked = a && a.lockedUntil > nowMs();
+  const [oldBox] = await Promise.all([oldFundsBox("stake"), Chain.staking().then(stakingParams).catch(() => {})]);
   return `<section class="page-head"><div class="wrap">
+    ${oldBox}
     ${head("Stake " + T(), `Stakers earn ${pct(1 - CONFIG.LP_SHARE)} of protocol fees in ${S()}, vote on how markets resolve, and earn ${T()} for voting with the final outcome.`, `<a class="btn btn-ghost" href="#/resolve">Resolution queue</a>`)}
     <div class="stat-grid">
       <div class="panel stat"><small>You have staked</small><b class="num">${a ? num(a.staked) : "0"}</b><em>${locked ? "Locked until " + fmtDate(new Date(a.lockedUntil).toISOString()) : ""}</em></div>
@@ -504,6 +530,7 @@ async function pageStakeChain(){
       <div class="panel pad"><h2 class="h3">What staking does</h2><div class="feed" style="margin-top:8px">
         <div><span>💸 Share of protocol fees</span><b>${pct(1 - CONFIG.LP_SHARE)}, in ${S()}</b></div>
         <div><span>🛡 Vote on market results</span><b>1 token = 1 vote</b></div>
+        ${Chain.quorum ? `<div><span>🗳 Minimum turnout to settle by vote</span><b class="num">${compactN(Chain.quorum)} ${T()}</b></div>` : ""}
         <div><span>🎯 Reward for correct votes</span><b>${Chain.voteRewardBps === null ? "A share of your stake" : Chain.voteRewardBps ? pct(Chain.voteRewardBps / 10000, 2).replace(/\.00%$/, "%") + " of your stake" : "Paused for now"}</b></div>
         <div><span>🏷 Trading fee discounts</span><b class="muted">Next market upgrade</b></div>
       </div><p class="side-note">After you vote, your stake stays locked until that market's voting closes, so nobody can vote twice with the same tokens.</p></div>
@@ -734,12 +761,17 @@ async function pageAdmin(){
   const chip = (ok, okText, badText, level = "warn") => `<span class="tag ${ok ? "ok" : level}">${ok ? "✓ " + okText : "! " + badText}</span>`;
   const row = (title, body, act = "") => `<div class="safety-row"><div><h3>${title}</h3><p>${body}</p></div><div class="act">${act}</div></div>`;
   const checks = [
+    ...(s.v2 ? [] : [row(`Contract version ${chip(false, "", "v1: upgrade available")}`,
+      "The new vault and staking (v2) add a minimum voter turnout, stop fees getting stuck, and let you recover slashed bonds. One run on the deploy page.",
+      `<a class="btn btn-grad btn-sm" href="/deploy/">Open upgrade</a>`)]),
     row(`Voting reward ${chip(s.voteRewardBps === 0, "Off", (s.voteRewardBps / 100) + "% of stake", "bad")}`,
       s.voteRewardBps === 0 ? "Nobody can farm free tokens by voting on markets they made themselves."
         : `Right now anyone can create a market, vote on it alone and collect ${s.voteRewardBps / 100}% of their stake as a reward, again and again. Turn it off until the new contracts (Step C) add a minimum turnout.`,
       s.voteRewardBps === 0 ? "" : `<button class="btn btn-grad btn-sm" data-act="safeReward">Turn off</button>`),
     row(`Your voting power ${chip(s.ownerStake >= stakeTarget, "Strong", s.ownerStake ? "Too small" : "No stake", "bad")}`,
-      `You've staked <b class="num">${num(s.ownerStake)}</b> ${T()}; everyone else together: <b class="num">${num(others)}</b>. There's no minimum turnout yet, so one stranger voting alone could decide a market. With at least twice everyone else's stake, your vote always wins.` +
+      `You've staked <b class="num">${num(s.ownerStake)}</b> ${T()}; everyone else together: <b class="num">${num(others)}</b>. ` +
+      (s.v2 ? `A market is settled by vote only when at least <b class="num">${num(s.quorum)}</b> ${T()} votes; below that you settle it. With at least twice everyone else's stake, your vote always wins.`
+        : `There's no minimum turnout yet, so one stranger voting alone could decide a market. With at least twice everyone else's stake, your vote always wins.`) +
       (stakeNeed > s.ownerTokens ? ` <span style="color:#ffd88a">Your wallet has only ${num(s.ownerTokens)} ${T()}.</span>` : "") +
       (s.ownerLockedUntil > nowMs() ? ` Your stake is locked until ${fmtDate(new Date(s.ownerLockedUntil).toISOString())} because you voted.` : ""),
       stakeNeed > 0 && s.ownerTokens >= 1 ? `<button class="btn btn-grad btn-sm" data-act="safeStake" data-v="${Math.min(stakeNeed, Math.floor(s.ownerTokens))}">Stake ${compactN(Math.min(stakeNeed, Math.floor(s.ownerTokens)))}</button>` : ""),
@@ -748,14 +780,16 @@ async function pageAdmin(){
       s.bond >= SAFE.bond ? "" : `<button class="btn btn-grad btn-sm" data-act="safeBond">Set to ${num(SAFE.bond)}</button>`),
     row(`Protocol reserve ${chip(canFund >= 20, money(s.reserve), money(s.reserve), canFund < 5 ? "bad" : "warn")}`,
       `Enough for about <b class="num">${num(canFund)}</b> more markets in the worst case. Markets can't be created when it runs out.`,
-      `<input class="input num" id="resAmt" type="number" min="1" value="100000" style="width:120px;height:36px" aria-label="Amount"><button class="btn btn-ghost btn-sm" data-act="safeFund">Add USDT</button>`)
+      `<input class="input num" id="resAmt" type="number" min="1" value="100000" style="width:120px;height:36px" aria-label="Amount"><button class="btn btn-ghost btn-sm" data-act="safeFund">Add USDT</button>`),
+    ...(s.v2 && s.unallocated > 0.01 ? [row(`Fees with no stakers <span class="tag cy">${money(s.unallocated, 2)}</span>`, "Fees that arrived while nobody was staked. They are kept for you instead of going to the first staker.", `<button class="btn btn-ghost btn-sm" data-act="safeSweepFees">Collect</button>`)] : []),
+    ...(s.v2 && s.slashedBonds > 0 ? [row(`Slashed market bonds <span class="tag cy">${tok(s.slashedBonds)}</span>`, "Bonds taken from unclear or abusive markets, sitting in the vault.", `<button class="btn btn-ghost btn-sm" data-act="safeSweepBonds">Collect</button>`)] : [])
   ];
   const queue = s.resolving.length ? s.resolving.map(m => {
     const lead = m.votes.YES === m.votes.NO ? "tie" : m.votes.YES > m.votes.NO ? "YES leads" : "NO leads";
     const voteBtns = m.open && !m.ownerVote && s.ownerStake > 0 ? `<button class="btn btn-ghost btn-sm" data-act="vote" data-id="${esc(m.id)}" data-side="YES">Vote YES</button><button class="btn btn-ghost btn-sm" data-act="vote" data-id="${esc(m.id)}" data-side="NO">Vote NO</button>` : "";
-    const fin = !m.open && (m.votes.YES + m.votes.NO) > 0 ? `<button class="btn btn-grad btn-sm" data-act="finalize" data-id="${esc(m.id)}">Finalize vote</button>` : "";
+    const fin = !m.open && (m.votes.YES + m.votes.NO) >= Math.max(1e-9, s.v2 ? s.quorum : 0) ? `<button class="btn btn-grad btn-sm" data-act="finalize" data-id="${esc(m.id)}">Finalize vote</button>` : "";
     return row(`<a href="${mHref(m.id)}">${esc(m.icon)} ${esc(m.q)}</a> ${m.ownerVote ? `<span class="tag ok">You voted ${esc(m.ownerVote)}</span>` : m.open ? `<span class="tag warn">You haven't voted</span>` : ""}`,
-      `YES <b class="num">${compactN(m.votes.YES)}</b> · NO <b class="num">${compactN(m.votes.NO)}</b> (${lead}). ${m.open ? "Voting closes " + new Date(m.voteEnds).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : (m.votes.YES + m.votes.NO) ? "Voting closed: finalize to pay winners." : "Voting closed with no votes: set the result yourself."}`,
+      `YES <b class="num">${compactN(m.votes.YES)}</b> · NO <b class="num">${compactN(m.votes.NO)}</b> (${lead})${s.v2 ? ` · needs ${compactN(s.quorum)}` : ""}. ${m.open ? "Voting closes " + new Date(m.voteEnds).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : !(m.votes.YES + m.votes.NO) ? "Voting closed with no votes: set the result yourself." : (s.v2 && m.votes.YES + m.votes.NO < s.quorum) ? "Voting closed with too few votes: set the result yourself." : "Voting closed: finalize to pay winners."}`,
       `${voteBtns}${fin}<button class="btn btn-ghost btn-sm" data-act="finalize" data-id="${esc(m.id)}" data-outcome="YES">Set YES</button><button class="btn btn-ghost btn-sm" data-act="finalize" data-id="${esc(m.id)}" data-outcome="NO">Set NO</button>`);
   }).join("") : `<p class="muted" style="padding:12px 0">No markets waiting for a result. 👍</p>`;
   const todo = checks.filter(c => c.includes('class="tag warn"') || c.includes('class="tag bad"')).length;
@@ -763,12 +797,13 @@ async function pageAdmin(){
     ${head("Safety panel", "Owner only. Fix each warning with one click (your wallet asks you to confirm), then open this page once a day.", `<span class="tag ${todo ? "warn" : "ok"}">${todo ? todo + " to fix" : "All safe"}</span>`)}
     <div class="panel pad"><h2 class="h3">Settings</h2>${checks.join("")}</div>
     <div class="panel pad" style="margin-top:16px"><h2 class="h3">Markets waiting for a result (${s.resolving.length})</h2>${queue}</div>
-    <div class="panel pad" style="margin-top:16px"><h2 class="h3">Fixed in the next contract upgrade (Step C)</h2>
+    <div class="panel pad" style="margin-top:16px"><h2 class="h3">${s.v2 ? "Still to do before mainnet" : "Fixed in the next contract upgrade (Step C)"}</h2>
       <div class="feed" style="margin-top:8px">
-        <div><span>Minimum voter turnout, and reward only for markets you didn't create</span><b class="muted">Step C</b></div>
+        ${s.v2 ? "" : `<div><span>Minimum voter turnout, and reward only for markets you didn't create</span><b class="muted">Step C</b></div>
         <div><span>Fee collection can be triggered by anyone and get stuck in the vault</span><b class="muted">Step C</b></div>
-        <div><span>Markets nobody votes on, and slashed bonds</span><b class="muted">Step C</b></div>
-        <div><span>Owner is one wallet (move to a multisig before mainnet)</span><b class="muted">Step E</b></div>
+        <div><span>Markets nobody votes on, and slashed bonds</span><b class="muted">Step C</b></div>`}
+        <div><span>Owner is one wallet (move to a multisig with a time delay)</span><b class="muted">Step E</b></div>
+        <div><span>Professional security audit of all contracts</span><b class="muted">Step E</b></div>
       </div><p class="side-note">Unharvested protocol fees: ${money(s.unharvested, 2)} · voting period ${num(s.votingPeriodH)} h · reward pool ${tok(s.rewardPool)}</p></div>
   </div></section>`;
 }
@@ -1014,6 +1049,11 @@ const ACTIONS = {
   async acceptInvite(el){
     await busy(el, "Accepting…", async () => { await api.acceptInvite(refBy().toLowerCase()); toast("Invite accepted. You now get fees back on every trade."); inviteBanner(); route(true); });
   },
+  async safeSweepFees(el){ await busy(el, "…", async () => { await api.sweepUnallocated(); toast("Fees sent to your wallet"); route(true); }); },
+  async safeSweepBonds(el){ await busy(el, "…", async () => { const r = await api.sweepSlashedBonds(); toast("Recovered " + tok(r.amount)); route(true); }); },
+  async oldWithdraw(el){ await busy(el, "…", async () => { await api.oldWithdraw({ id: el.dataset.id }); toast("Withdrawn from the old vault"); await refreshAccount(); route(true); }); },
+  async oldUnstake(el){ await busy(el, "…", async () => { const r = await api.oldUnstake(); toast("Unstaked " + tok(r.amount) + ". You can stake it in the new contract now."); await refreshAccount(); route(true); }); },
+  async oldClaimFees(el){ await busy(el, "…", async () => { await api.oldClaimStakeFees(); toast("Old staking fees sent to your wallet"); await refreshAccount(); route(true); }); },
   async safeReward(el){ await busy(el, "…", async () => { await api.setVoteReward(0); toast("Voting reward turned off"); route(true); }); },
   async safeBond(el){ await busy(el, "…", async () => { await api.setBond(SAFE.bond); toast("Bond set to " + num(SAFE.bond) + " " + T()); route(true); }); },
   async safeStake(el){ await busy(el, "…", async () => { await api.stake({ amount: +el.dataset.v }); toast("Staked " + num(+el.dataset.v) + " " + T()); await refreshAccount(); route(true); }); },

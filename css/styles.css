@@ -438,3 +438,4 @@ input[type=range]{width:100%;accent-color:var(--mint)}
 .safety-row p{font-size:13px;color:var(--text-2);margin-top:4px}
 .safety-row .act{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
 @media (max-width:600px){.safety-row{grid-template-columns:1fr}.safety-row .act{justify-content:flex-start}}
+[hidden]{display:none!important}

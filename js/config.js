@@ -27,6 +27,19 @@ const CONFIG = {
     discord: ""                     // optional
   },
 
+  // ---- smart contracts (on-chain mode) --------------------------------
+  // When CHAIN_ON is true, markets, trading, the faucet and payouts run on
+  // the blockchain through these contracts instead of the database.
+  CHAIN_ON: true,
+  CONTRACTS: {
+    owner:  "0xb826527186f70382A3be618215DBe2B7955d61d4",
+    usdt:   "0x3011487baF4c7c0D4745317de7A2F1305BD2FFA0",   // test USDT (faucet)
+    token:  "0x822a5E3Ee4901694124F2aB35C695EA6c9219721",   // test $369X (faucet)
+    market: "0x3C8a6DFF6Be5fDE0fDEE59cBC9e6E69650d84A09"    // Market369X
+  },
+  // public read-only RPC endpoints (tried in order)
+  READ_RPCS: ["https://bsc-testnet-rpc.publicnode.com", "https://data-seed-prebsc-1-s1.bnbchain.org:8545", "https://data-seed-prebsc-2-s1.bnbchain.org:8545"],
+
   // ---- network (BNB Smart Chain Testnet by default) ------------------
   CHAIN: {
     chainId: "0x61",                // 97 = BSC Testnet. Mainnet is "0x38" (56)
@@ -85,7 +98,7 @@ const CONFIG = {
   ],
 
   // ---- token page (PLACEHOLDER numbers, replace with your real plan) --
-  TOKEN_ADDRESS: "",                // paste the token contract address after you deploy it
+  TOKEN_ADDRESS: "0x822a5E3Ee4901694124F2aB35C695EA6c9219721",   // test $369X on BSC Testnet
   TOKEN_SUPPLY: 3690000000,
   TOKEN_ALLOCATION: [
     ["Community airdrop", 10, "#7cf26a"],

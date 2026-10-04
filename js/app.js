@@ -377,7 +377,7 @@ function positionsTable(list, compactView){
       <td class="r num">${p.liq ? cents(p.liq) : "—"}</td>
       <td class="r num">${money(Math.max(0, p.equity), 2)}</td>
       <td class="r num ${p.pnl >= 0 ? "pos" : "neg"}">${signed(p.pnl)}</td>
-      <td class="r">${p.status === "live" ? `<button class="btn btn-ghost btn-sm" data-act="close" data-id="${esc(p.id)}">${CHAIN_ON ? "Sell" : "Close"}</button>`
+      <td class="r" style="white-space:nowrap"><button class="icon-btn" data-act="sharePos" data-id="${esc(p.id)}" aria-label="Share this position" title="Share P&amp;L">${ic("share")}</button>${p.status === "live" ? `<button class="btn btn-ghost btn-sm" data-act="close" data-id="${esc(p.id)}">${CHAIN_ON ? "Sell" : "Close"}</button>`
         : p.status === "resolved" && p.outcome === p.side ? `<button class="btn btn-grad btn-sm" data-act="redeem" data-id="${esc(p.marketId)}">Redeem</button>`
         : `<span class="muted" style="font-size:12px">Awaiting result</span>`}</td>
     </tr>`).join("")}</tbody></table>`;
@@ -428,7 +428,7 @@ async function pagePortfolio(){
     <div class="stat-grid">
       <div class="panel stat"><small>Available ${S()}</small><b class="num">${money(a.stable, 2)}</b></div>
       <div class="panel stat"><small>Open positions value</small><b class="num">${money(open, 2)}</b></div>
-      <div class="panel stat"><small>Total P&amp;L</small><b class="num ${a.pnl + unreal >= 0 ? "pos" : "neg"}">${signed(a.pnl + unreal)}</b><em>${signed(unreal)} unrealized</em></div>
+      <div class="panel stat"><small>Total P&amp;L</small><b class="num ${a.pnl + unreal >= 0 ? "pos" : "neg"}">${signed(a.pnl + unreal)}</b><em>${signed(unreal)} unrealized</em>${a.trades ? `<button class="btn btn-ghost btn-sm stat-share" data-act="shareTotal">${ic("share")}Share</button>` : ""}</div>
       <div class="panel stat"><small>${T()} wallet / staked</small><b class="num">${compactN(a.token)} / ${compactN(a.staked)}</b></div>
     </div>
     <div class="panel" style="margin-top:16px"><div class="pad" style="padding-bottom:0"><h2 class="h3">Open positions</h2></div>
@@ -437,8 +437,8 @@ async function pagePortfolio(){
       <thead><tr><th>Market</th><th>Status</th><th class="r">Volume</th><th class="r">You earned</th><th class="r">Bond</th></tr></thead>
       <tbody>${a.created.map(m => `<tr><td style="white-space:normal;min-width:220px"><a href="${mHref(m.id)}">${esc(m.q)}</a></td><td>${statusTag(m)}</td><td class="r num">${money(m.vol)}</td><td class="r num pos">+${money(m.creatorEarned, 2)}${m.creatorFeesUnclaimed > 0.0001 ? ` <button class="btn btn-ghost btn-sm" data-act="claimFees" data-id="${esc(m.id)}">Claim</button>` : ""}</td><td class="r num">${m.bond.returned ? "Returned" : tok(m.bond.amount)}</td></tr>`).join("")}</tbody></table></div></div>` : ""}
     <div class="panel" style="margin-top:16px"><div class="pad" style="padding-bottom:0"><h2 class="h3">History</h2></div>
-      ${a.history.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Market</th><th>Side</th><th class="r">Staked</th><th class="r">Received</th><th class="r">Result</th><th class="r">When</th></tr></thead><tbody>
-      ${a.history.slice(0, 50).map(h => `<tr><td style="white-space:normal;min-width:220px">${catIcon(h.icon)} ${esc(h.q)}</td><td>${esc(h.side)}${h.lev > 1 ? `<span class="lev-badge">${h.lev}×</span>` : ""}</td><td class="r num">${money(h.margin, 2)}</td><td class="r num">${money(h.received, 2)}</td><td class="r num ${h.received >= h.margin ? "pos" : "neg"}">${esc(h.how)} ${signed(h.received - h.margin)}</td><td class="r muted">${ago(h.closedAt)}</td></tr>`).join("")}
+      ${a.history.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Market</th><th>Side</th><th class="r">Staked</th><th class="r">Received</th><th class="r">Result</th><th class="r">When</th><th></th></tr></thead><tbody>
+      ${a.history.slice(0, 50).map((h, i) => `<tr><td style="white-space:normal;min-width:220px">${catIcon(h.icon)} ${esc(h.q)}</td><td>${esc(h.side)}${h.lev > 1 ? `<span class="lev-badge">${h.lev}×</span>` : ""}</td><td class="r num">${money(h.margin, 2)}</td><td class="r num">${money(h.received, 2)}</td><td class="r num ${h.received >= h.margin ? "pos" : "neg"}">${esc(h.how)} ${signed(h.received - h.margin)}</td><td class="r muted">${ago(h.closedAt)}</td><td class="r"><button class="icon-btn" data-act="shareHist" data-i="${i}" aria-label="Share this trade" title="Share P&amp;L">${ic("share")}</button></td></tr>`).join("")}
       </tbody></table></div>` : `<div class="empty">Closed and settled trades show up here.</div>`}</div>
   </div></section>`;
 }
@@ -1052,6 +1052,23 @@ const ACTIONS = {
   },
   anRange(el){ AN.range = el.dataset.v; $$(".an-filters .chip").forEach(b => { b.classList.toggle("on", b.dataset.v === AN.range); b.setAttribute("aria-pressed", b.dataset.v === AN.range); }); renderAnalytics(); },
   anTable(){ AN.table = !AN.table; renderAnalytics(); },
+  sharePos(el){ const p = (ACC?.positions || []).find(x => x.id === el.dataset.id); if(p) openShare(shareItemFromPosition(p)); },
+  shareHist(el){ const h = ACC?.history?.[+el.dataset.i]; if(h) openShare(shareItemFromHistory(h)); },
+  shareTotal(){ if(ACC) openShare(shareItemTotal(ACC)); },
+  shareClose(){ closeShare(); },
+  async shareDownload(){
+    const a = document.createElement("a"); a.href = SHARE.url; a.download = `369x-pnl-${Date.now()}.png`; document.body.appendChild(a); a.click(); a.remove(); toast("Image saved");
+  },
+  async shareCopy(){
+    try{ await navigator.clipboard.write([new ClipboardItem({ "image/png": shareBlob() })]); toast("Image copied. Paste it into any chat or post."); }
+    catch(e){ toast("Couldn't copy here. Use Save image instead.", true); }
+  },
+  async shareNative(){
+    try{ await navigator.share({ files: [await shareFile()], text: shareText() + " " + shareLink().url }); }
+    catch(e){ if(e.name !== "AbortError") toast("Sharing isn't available here. Use Save image.", true); }
+  },
+  shareX(){ window.open("https://x.com/intent/post?text=" + encodeURIComponent(shareText()) + "&url=" + encodeURIComponent(shareLink().url), "_blank", "noopener"); toast("Tip: attach the saved image to your post"); },
+  shareTg(){ window.open("https://t.me/share/url?url=" + encodeURIComponent(shareLink().url) + "&text=" + encodeURIComponent(shareText()), "_blank", "noopener"); },
   async safeSweepFees(el){ await busy(el, "…", async () => { await api.sweepUnallocated(); toast("Fees sent to your wallet"); route(true); }); },
   async safeSweepBonds(el){ await busy(el, "…", async () => { const r = await api.sweepSlashedBonds(); toast("Recovered " + tok(r.amount)); route(true); }); },
   async oldWithdraw(el){ await busy(el, "…", async () => { await api.oldWithdraw({ id: el.dataset.id }); toast("Withdrawn from the old vault"); await refreshAccount(); route(true); }); },

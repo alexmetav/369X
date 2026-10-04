@@ -490,3 +490,16 @@ input[type=range]{width:100%;accent-color:var(--mint)}
 .feed span:has(> .ic){display:inline-flex;align-items:center;gap:10px}
 td > a .ic,td .ic{margin-right:4px}
 .btn .ic{width:16px;height:16px}
+
+/* share P&L */
+.icon-btn{display:inline-grid;place-items:center;width:32px;height:32px;border-radius:50%;color:var(--text-2);background:rgba(255,255,255,.05);margin-right:6px;vertical-align:middle;transition:background .15s,color .15s}
+.icon-btn:hover,.icon-btn:focus-visible{background:rgba(255,255,255,.1);color:var(--text)}
+.icon-btn .ic{width:16px;height:16px}
+.stat-share{margin-top:10px;height:32px;padding:0 12px;font-size:13px}
+.share-sheet{width:min(760px,100%)}
+.share-body{padding:clamp(18px,3vw,28px)}
+.share-preview{margin-top:14px;border-radius:16px;overflow:hidden;border:1px solid var(--line);background:#040607;aspect-ratio:1200/630}
+.share-preview img{display:block;width:100%;height:100%;transition:opacity .15s}
+.share-hide{margin-top:14px;display:flex;align-items:center;gap:8px;font-size:14px;color:var(--text-2)}
+.share-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+@media (max-width:600px){.share-actions .btn{flex:1 1 calc(50% - 8px)}}

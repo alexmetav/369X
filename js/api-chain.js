@@ -440,6 +440,7 @@ async function chainAccount(w){
     ended.forEach((m, k) => { const vo = r[i + 3 + k]; if(vo?.voted) u.votes[m.id] = { side: vo.yes ? "YES" : "NO", weight: Chain.fmt(vo.weight), claimed: vo.claimed }; });
   }
   const hasCode = rf ? !!r[extra.ref] : false;
+  u.refCode = rf && r[extra.ref] ? String(r[extra.ref]) : null;
   u.points = { parts: { Trading: Math.round(volume), Vault: Math.round(vaultPts) } };
   u.badges = Engine.badges(u, hasCode); u.stakeTier = Engine.stakeTier(0);
   u.points.parts.Badges = u.badges.filter(b => b.got).length * 500;

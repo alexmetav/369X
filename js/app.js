@@ -68,7 +68,7 @@ function renderNav(){
         <div class="sep"></div>
         <button data-act="faucet">💧 Get test funds</button>
         <a href="#/portfolio">📊 Portfolio</a>
-        ${CHAIN_ON && ACC?.isAdmin ? `<a href="#/admin">🛡 Safety panel</a>` : ""}
+        ${CHAIN_ON && ACC?.isAdmin ? `<a href="#/admin">🛡 Safety panel</a><a href="#/analytics">📈 Analytics</a>` : ""}
         <button data-act="copyAddr">📋 Copy address</button>
         ${CHAIN_ON ? `<a href="${CONFIG.CHAIN.blockExplorerUrls[0]}/address/${esc(a)}" target="_blank" rel="noopener">🔎 View on BscScan</a>` : ""}
         <button data-act="disconnect">⏏ Disconnect</button>
@@ -794,7 +794,7 @@ async function pageAdmin(){
   }).join("") : `<p class="muted" style="padding:12px 0">No markets waiting for a result. 👍</p>`;
   const todo = checks.filter(c => c.includes('class="tag warn"') || c.includes('class="tag bad"')).length;
   return `<section class="page-head"><div class="wrap">
-    ${head("Safety panel", "Owner only. Fix each warning with one click (your wallet asks you to confirm), then open this page once a day.", `<span class="tag ${todo ? "warn" : "ok"}">${todo ? todo + " to fix" : "All safe"}</span>`)}
+    ${head("Safety panel", "Owner only. Fix each warning with one click (your wallet asks you to confirm), then open this page once a day.", `<a class="btn btn-ghost btn-sm" href="#/analytics">📈 Analytics</a><span class="tag ${todo ? "warn" : "ok"}">${todo ? todo + " to fix" : "All safe"}</span>`)}
     <div class="panel pad"><h2 class="h3">Settings</h2>${checks.join("")}</div>
     <div class="panel pad" style="margin-top:16px"><h2 class="h3">Markets waiting for a result (${s.resolving.length})</h2>${queue}</div>
     <div class="panel pad" style="margin-top:16px"><h2 class="h3">${s.v2 ? "Still to do before mainnet" : "Fixed in the next contract upgrade (Step C)"}</h2>
@@ -895,7 +895,7 @@ function setDial(v){
    ROUTER
    ===================================================================== */
 const PAGES = { home: pageHome, markets: pageMarkets, leverage: pageLeverage, market: pageMarket, create: pageCreate, portfolio: pagePortfolio, vault: pageVault, stake: pageStake,
-  resolve: pageResolve, rewards: pageRewards, leaderboard: pageLeaderboard, affiliate: pageAffiliate, token: pageToken, docs: pageDocs, legal: pageLegal, admin: pageAdmin, more: pageMore };
+  resolve: pageResolve, rewards: pageRewards, leaderboard: pageLeaderboard, affiliate: pageAffiliate, token: pageToken, docs: pageDocs, legal: pageLegal, admin: pageAdmin, analytics: pageAnalytics, more: pageMore };
 const MORE = ["create", "stake", "resolve", "affiliate", "token", "docs"];
 
 let routeSeq = 0;
@@ -934,6 +934,7 @@ function afterRender(r){
   }
   if(r === "create"){ ["cq", "ccat", "cend", "cp"].forEach(id => $("#" + id)?.addEventListener("input", previewCreate)); if($("#cprev")) previewCreate(); }
   if(r === "leverage"){ ["simP", "simAmt"].forEach(id => $("#" + id).addEventListener("input", updateSim)); updateSim(); }
+  if(r === "analytics") renderAnalytics();
   if(r === "vault" && $("#vamt")){ $("#vamt").addEventListener("input", updateVaultSum); updateVaultSum(); }
 }
 
@@ -1049,6 +1050,8 @@ const ACTIONS = {
   async acceptInvite(el){
     await busy(el, "Accepting…", async () => { await api.acceptInvite(refBy().toLowerCase()); toast("Invite accepted. You now get fees back on every trade."); inviteBanner(); route(true); });
   },
+  anRange(el){ AN.range = el.dataset.v; $$(".an-filters .chip").forEach(b => { b.classList.toggle("on", b.dataset.v === AN.range); b.setAttribute("aria-pressed", b.dataset.v === AN.range); }); renderAnalytics(); },
+  anTable(){ AN.table = !AN.table; renderAnalytics(); },
   async safeSweepFees(el){ await busy(el, "…", async () => { await api.sweepUnallocated(); toast("Fees sent to your wallet"); route(true); }); },
   async safeSweepBonds(el){ await busy(el, "…", async () => { const r = await api.sweepSlashedBonds(); toast("Recovered " + tok(r.amount)); route(true); }); },
   async oldWithdraw(el){ await busy(el, "…", async () => { await api.oldWithdraw({ id: el.dataset.id }); toast("Withdrawn from the old vault"); await refreshAccount(); route(true); }); },

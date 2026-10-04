@@ -185,6 +185,83 @@
     const box = document.createElement("div"); box.className = "panel pad"; box.style.marginTop = "24px";
     box.innerHTML = ["usdt", "token", "market", "vault", "staking", "referral"].map(k => `<div class="bal-row"><span>${k}</span><a style="color:var(--cyan)" target="_blank" rel="noopener" href="${explorer}/address/${C[k]}">${C[k]}</a></div>`).join("");
     document.querySelector("main").appendChild(box);
+    verifyPanel();
+  }
+
+  // ---- publish the source code (Sourcify: public, free, no API key) + files for BscScan ----
+  const SOURCIFY = "https://sourcify.dev/server";
+  const VERIFY = [
+    ["usdt", "TestToken", ["string", "string", "uint256", "uint256"], () => ["369X Test USDT", "tUSDT", E(1000), E(10_000_000)]],
+    ["token", "TestToken", ["string", "string", "uint256", "uint256"], () => ["369X Test Token", "t369X", E(5000), E(3_690_000_000)]],
+    ["market", "Market369X", ["address", "address", "address", "address"], () => [C.usdt, C.token, C.owner, C.owner]],
+    ["vault", "Vault369X", ["address", "address"], () => [C.usdt, C.market]],
+    ["staking", "Stake369X", ["address", "address", "address"], () => [C.token, C.usdt, C.market]],
+    ["referral", "Referral369X", ["address", "address"], () => [C.usdt, C.market]]
+  ];
+  function verifyPanel(){
+    const box = document.createElement("div"); box.className = "panel pad"; box.style.marginTop = "16px";
+    box.innerHTML = `<h2 class="h3">Publish the source code</h2>
+      <p class="muted" style="margin-top:6px">Lets anyone check that these contracts run exactly the code in your project. Uses Sourcify, a free public verification service. No wallet, no fees, no keys.</p>
+      <div class="hero-cta" style="margin-top:14px"><button class="btn btn-grad" id="verifyGo">Verify source code</button></div>
+      <div class="steps-list" id="verifyList">${VERIFY.map(([k, n]) => `<div id="v-${k}"><span>${k} · ${n}</span><span class="muted">not checked</span></div>`).join("")}</div>
+      <details style="margin-top:16px"><summary class="muted" style="cursor:pointer">Also want the green check on BscScan? (optional, manual)</summary>
+        <ol class="muted" style="margin:10px 0 0 18px;display:grid;gap:6px;font-size:14px">
+          <li><button class="btn btn-ghost btn-sm" id="dlInput">Download source file (369x-standard-input.json)</button></li>
+          <li>On BscScan open a contract below → <b>Contract</b> tab → <b>Verify and Publish</b>.</li>
+          <li>Compiler type <b>Solidity (Standard-Json-Input)</b>, version <b id="vVer"></b>, license <b>MIT</b>. Upload the file.</li>
+          <li>Paste that contract's <b>constructor arguments</b> (Copy button below), then submit. Repeat for each contract.</li>
+        </ol>
+        <div style="margin-top:10px">${VERIFY.map(([k, n]) => `<div class="bal-row"><span>${k} · ${n}</span><span><a style="color:var(--cyan)" target="_blank" rel="noopener" href="${explorer}/verifyContract?a=${C[k]}">Verify on BscScan</a> · <button style="color:var(--lime)" data-args="${k}">Copy constructor args</button></span></div>`).join("")}</div>
+      </details>`;
+    document.querySelector("main").appendChild(box);
+    let vj = null;
+    const getVJ = async () => vj || (vj = await (await fetch("/deploy/verify.json")).json());
+    const args = (k) => { const [, , types, vals] = VERIFY.find(v => v[0] === k); return ethers.AbiCoder.defaultAbiCoder().encode(types, vals()).slice(2); };
+    box.querySelectorAll("[data-args]").forEach(b => b.onclick = async () => { const a = args(b.dataset.args); try{ await navigator.clipboard.writeText(a); toast("Constructor arguments copied"); }catch(e){ prompt("Copy:", a); } });
+    getVJ().then(j => { $("#vVer").textContent = "v" + j.compilerVersion; }).catch(() => {});
+    $("#dlInput").onclick = async () => {
+      const j = await getVJ(), url = URL.createObjectURL(new Blob([JSON.stringify(j.input)], { type: "application/json" }));
+      const a = document.createElement("a"); a.href = url; a.download = "369x-standard-input.json"; a.click(); setTimeout(() => URL.revokeObjectURL(url), 5000);
+    };
+    const chain = Number(CONFIG.CHAIN.chainId);
+    const show = (k, html) => { const el = $("#v-" + k); if(el) el.lastElementChild.outerHTML = `<span>${html}</span>`; };
+    const link = (k) => `<a style="color:var(--cyan)" target="_blank" rel="noopener" href="https://repo.sourcify.dev/${chain}/${C[k]}">✓ verified</a>`;
+    async function status(addr){
+      const r = await fetch(`${SOURCIFY}/v2/contract/${chain}/${addr}`);
+      if(r.status === 404) return null;
+      const j = await r.json(); return j.match || j.runtimeMatch || j.creationMatch || null;
+    }
+    async function verifyOne(k, name, j){
+      const addr = C[k];
+      if(await status(addr)) return show(k, link(k));
+      show(k, "Sending…");
+      const r = await fetch(`${SOURCIFY}/v2/verify/${chain}/${addr}`, { method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ stdJsonInput: j.input, compilerVersion: j.compilerVersion, contractIdentifier: j.ids[name] }) });
+      const body = await r.json().catch(() => ({}));
+      if(r.status === 409) return show(k, link(k));                    // already verified
+      if(!r.ok || !body.verificationId) throw new Error(body.message || ("Sourcify said " + r.status));
+      for(let i = 0; i < 60; i++){
+        await new Promise(res => setTimeout(res, 3000));
+        const jj = await (await fetch(`${SOURCIFY}/v2/verify/${body.verificationId}`)).json();
+        if(!jj.isJobCompleted){ show(k, "Checking…"); continue; }
+        if(jj.error) throw new Error(jj.error.message || jj.error.customCode || "Not verified");
+        return show(k, link(k));
+      }
+      throw new Error("Still checking. Press Verify again in a minute.");
+    }
+    $("#verifyGo").onclick = async () => {
+      $("#verifyGo").disabled = true;
+      let ok = 0;
+      try{
+        const j = await getVJ();
+        for(const [k, name] of VERIFY){
+          try{ await verifyOne(k, name, j); ok++; }
+          catch(e){ show(k, `<span style="color:var(--no)">${String(e.message || e).replace(/</g, "&lt;").slice(0, 120)}</span>`); }
+        }
+      }catch(e){ toast(e.message || "Couldn't reach Sourcify", true); }
+      $("#verifyGo").disabled = false;
+      toast(ok === VERIFY.length ? "All contracts verified" : `${ok} of ${VERIFY.length} verified`, ok !== VERIFY.length);
+    };
   }
   async function isV2(){
     for(const url of CONFIG.READ_RPCS){

@@ -145,6 +145,16 @@
     toast("All done. Copy the addresses below and send them to Claude.");
   }
 
+  if(C.vault && C.staking){
+    // everything is live: show the addresses, no deploy buttons
+    document.querySelector("h1").textContent = "All 369X contracts are live";
+    document.querySelector(".lede").innerHTML = "Nothing to deploy. These are the contracts your website uses on " + CONFIG.CHAIN.chainName + ".";
+    document.querySelectorAll(".panel").forEach(el => el.hidden = true);
+    const box = document.createElement("div"); box.className = "panel pad"; box.style.marginTop = "24px";
+    box.innerHTML = ["usdt", "token", "market", "vault", "staking"].map(k => `<div class="bal-row"><span>${k}</span><a style="color:var(--cyan)" target="_blank" rel="noopener" href="${explorer}/address/${C[k]}">${C[k]}</a></div>`).join("");
+    document.querySelector("main").appendChild(box);
+    return;
+  }
   if(PHASE2){
     document.querySelector("h1").textContent = "Add the vault and staking";
     document.querySelector(".lede").innerHTML = "Your markets are already live. This adds the <b>liquidity vault</b> and <b>$369X staking</b> contracts and connects them to your market. About 6 MetaMask confirmations, paid in free test BNB.";

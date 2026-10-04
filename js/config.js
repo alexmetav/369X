@@ -36,8 +36,8 @@ const CONFIG = {
     usdt:   "0x3011487baF4c7c0D4745317de7A2F1305BD2FFA0",   // test USDT (faucet)
     token:  "0x822a5E3Ee4901694124F2aB35C695EA6c9219721",   // test $369X (faucet)
     market: "0x3C8a6DFF6Be5fDE0fDEE59cBC9e6E69650d84A09",   // Market369X
-    vault:   "",   // Vault369X: filled in after you run the deploy page's vault + staking step
-    staking: ""    // Stake369X
+    vault:   "0x01681060c0179e60322D69F274F3cDbE83330971",  // Vault369X
+    staking: "0x79c163F2c33fdf0Db5e56723fe86961247048432"   // Stake369X
   },
   // public read-only RPC endpoints (tried in order)
   READ_RPCS: ["https://bsc-testnet-rpc.publicnode.com", "https://data-seed-prebsc-1-s1.bnbchain.org:8545", "https://data-seed-prebsc-2-s1.bnbchain.org:8545"],

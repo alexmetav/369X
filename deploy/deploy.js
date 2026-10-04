@@ -69,6 +69,8 @@
       return `<div class="${cls}"><span>${st.label.replace(/</g, "&lt;")}</span><span>${right}</span></div>`;
     }).join("");
     const all = list.every(st => state.done[st.id]);
+    $("#reset").hidden = all;                 // nothing to restart once everything is deployed
+    $("#go").hidden = all;
     $("#resultBox").hidden = !state.market;
     if(state.market) $("#result").textContent = JSON.stringify({
       network: CONFIG.CHAIN.chainName, chainId: Number(chainId), owner: me,
@@ -122,6 +124,6 @@
   $("#connect").onclick = () => connect().catch(e => toast(e.shortMessage || e.message, true));
   $("#go").onclick = go;
   $("#seed").onchange = () => me && render(load(), steps($("#seed").checked));
-  $("#reset").onclick = () => { if(me && confirm("Forget saved progress and deploy fresh contracts?")){ localStorage.removeItem(key()); render(load(), steps($("#seed").checked)); } };
+  $("#reset").onclick = () => { if(me && confirm("This does NOT delete anything on the blockchain. It only forgets the progress saved in this browser, so the next Deploy creates a brand-new, separate set of contracts. Your website keeps using the current ones. Continue?")){ localStorage.removeItem(key()); render(load(), steps($("#seed").checked)); } };
   $("#copy").onclick = async () => { try{ await navigator.clipboard.writeText($("#result").textContent); toast("Copied"); }catch(e){ prompt("Copy:", $("#result").textContent); } };
 })();

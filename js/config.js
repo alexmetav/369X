@@ -6,15 +6,15 @@
 const CONFIG = {
   // ---- mode ----------------------------------------------------------
   // true  = demo mode. Everything runs in the browser with test money.
-  // false = talk to a real backend at API_BASE (see js/api.js).
-  USE_MOCK: true,
+  // false = use the shared Supabase database below (js/api-supabase.js).
+  USE_MOCK: false,
   API_BASE: "",                     // e.g. "https://api.369x.io"
 
   // ---- live backend (Supabase) -------------------------------------
   // Fill these in and set USE_MOCK to false to use the shared database.
   // The key is the PUBLISHABLE key (safe to put in the website).
-  SUPABASE_URL: "",
-  SUPABASE_KEY: "",
+  SUPABASE_URL: "https://uprlwmaogmjurmlzdhez.supabase.co",
+  SUPABASE_KEY: "sb_publishable_uL1HkDp5twMw7KqIS2PMJw_6ZOSVhOm",
 
   // ---- brand ---------------------------------------------------------
   SITE_NAME: "369X",

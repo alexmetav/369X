@@ -503,3 +503,28 @@ td > a .ic,td .ic{margin-right:4px}
 .share-hide{margin-top:14px;display:flex;align-items:center;gap:8px;font-size:14px;color:var(--text-2)}
 .share-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
 @media (max-width:600px){.share-actions .btn{flex:1 1 calc(50% - 8px)}}
+
+/* 369X loader (core.js loader()) */
+.xl{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;min-height:46vh;padding:40px 16px;text-align:center}
+.xl-sm{min-height:0;padding:36px 16px;gap:14px}
+.xl-logo{position:relative;width:160px;height:66px}
+.xl-sm .xl-logo{width:110px;height:45px}
+.xl-logo img{width:100%;height:100%;display:block;object-fit:contain;animation:xl-breathe 1.8s ease-in-out infinite}
+.xl-shine{position:absolute;inset:0;-webkit-mask:url(../assets/logo.png) center/contain no-repeat;mask:url(../assets/logo.png) center/contain no-repeat;
+  background:linear-gradient(105deg,transparent 30%,rgba(255,255,255,.85) 48%,rgba(124,242,106,.6) 52%,transparent 70%) 0 0/300% 100% no-repeat;animation:xl-shine 1.6s ease-in-out infinite}
+.xl-bar{width:140px;height:3px;border-radius:3px;background:rgba(255,255,255,.07);overflow:hidden}
+.xl-sm .xl-bar{width:100px}
+.xl-bar i{display:block;width:40%;height:100%;border-radius:3px;background:var(--grad);animation:xl-bar 1.2s cubic-bezier(.65,0,.35,1) infinite}
+.xl-text{font-size:13px;color:var(--text-3);letter-spacing:.02em}
+@keyframes xl-shine{0%{background-position:120% 0}100%{background-position:-60% 0}}
+@keyframes xl-breathe{0%,100%{opacity:.85;transform:scale(1)}50%{opacity:1;transform:scale(1.03)}}
+@keyframes xl-bar{0%{transform:translateX(-110%)}100%{transform:translateX(260%)}}
+/* button busy state: small gradient ring */
+.xl-ring{width:16px;height:16px;flex:none;border-radius:50%;background:conic-gradient(from 0deg,transparent 0 25%,#7cf26a,#6fe6c0,#5fd6f2);
+  -webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 2.5px),#000 calc(100% - 2px));mask:radial-gradient(farthest-side,transparent calc(100% - 2.5px),#000 calc(100% - 2px));animation:xl-spin .8s linear infinite}
+.btn-grad .xl-ring{background:conic-gradient(from 0deg,transparent 0 25%,rgba(3,4,5,.9))}
+.is-busy{cursor:progress}
+@keyframes xl-spin{to{transform:rotate(360deg)}}
+.share-preview{position:relative}
+.share-loading{position:absolute;inset:0;display:grid;place-items:center;background:rgba(4,6,7,.6)}
+@media (prefers-reduced-motion: reduce){.xl-shine{display:none}.xl-ring{animation:none}}

@@ -36,6 +36,11 @@ const delay = (ms) => new Promise(r => setTimeout(r, ms));
 const randAddr = () => { const h = "0123456789abcdef"; let a = "0x"; for(let i = 0; i < 40; i++) a += h[Math.floor(Math.random() * 16)]; return a; };
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
+// branded loader: the 369X logo with a light sweep and a gradient bar
+function loader(text = "Loading…", small = false){
+  return `<div class="xl${small ? " xl-sm" : ""}" role="status" aria-live="polite"><div class="xl-logo"><img src="assets/logo.png" alt="" width="160" height="66"><i class="xl-shine" aria-hidden="true"></i></div><div class="xl-bar" aria-hidden="true"><i></i></div><p class="xl-text">${esc(text)}</p></div>`;
+}
+
 let toastT;
 function toast(msg, bad){
   const t = $("#toast");

@@ -216,7 +216,8 @@ async function pageMarkets(){
 }
 let fillSeq = 0;
 async function fillMarkets(){
-  const n = ++fillSeq;
+  const n = ++fillSeq, g0 = $("#mgrid");
+  if(g0 && !g0.children.length) g0.innerHTML = `<div style="grid-column:1/-1">${loader("Loading markets…", true)}</div>`;
   const list = await api.getMarkets({ category: mState.cat, q: mState.q, status: mState.status, sort: mState.sort });
   if(n !== fillSeq) return;                                  // the user changed the filter meanwhile
   const g = $("#mgrid"); if(!g) return;
@@ -909,9 +910,15 @@ async function route(keepScroll){
   clearInterval(pollT);
   if(wallet.address && !ACC) await refreshAccount();
   const app = $("#app");
+  // show the 369X loader if a new page takes more than a moment (not on in-place refreshes)
+  const LOAD_TEXT = { home: "Loading markets…", markets: "Loading markets…", market: "Loading market…", portfolio: "Loading your portfolio…",
+    vault: "Loading the vault…", stake: "Loading staking…", resolve: "Loading results…", leaderboard: "Loading the leaderboard…",
+    affiliate: "Loading your rewards…", rewards: "Loading your points…", admin: "Checking safety settings…", analytics: "Crunching the numbers…" };
+  const loadT = keepScroll ? null : setTimeout(() => { if(seq === routeSeq){ app.innerHTML = `<section class="page-head"><div class="wrap">${loader(LOAD_TEXT[r] || "Loading…")}</div></section>`; } }, 180);
   let html;
   try{ html = await PAGES[r](r === "market" ? param : query, query); }
   catch(e){ console.error(e); html = `<section class="page-head"><div class="wrap"><div class="panel empty">Something went wrong: ${esc(e.message)}<br><a class="btn btn-ghost" href="#/">Go home</a></div></div></section>`; }
+  clearTimeout(loadT);
   if(seq !== routeSeq) return;                  // user moved on while this page was loading
   app.innerHTML = html;
   afterRender(r);
@@ -942,8 +949,10 @@ function afterRender(r){
    BUTTON ACTIONS  (every data-act="..." lands here)
    ===================================================================== */
 async function busy(btn, label, fn){
-  const old = btn?.textContent; if(btn){ btn.disabled = true; btn.textContent = label; }
-  try{ await fn(); }catch(e){ toast(e.message, true); if(btn && document.body.contains(btn)){ btn.disabled = false; btn.textContent = old; } }
+  const old = btn?.innerHTML;
+  if(btn){ btn.disabled = true; btn.classList.add("is-busy"); btn.innerHTML = `<span class="xl-ring" aria-hidden="true"></span>${label === "…" ? "" : esc(label)}`; btn.setAttribute("aria-busy", "true"); }
+  try{ await fn(); }
+  catch(e){ toast(e.message, true); if(btn && document.body.contains(btn)){ btn.disabled = false; btn.classList.remove("is-busy"); btn.removeAttribute("aria-busy"); btn.innerHTML = old; } }
 }
 const ACTIONS = {
   noop(){},

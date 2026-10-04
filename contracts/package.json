@@ -1,0 +1,18 @@
+{
+  "name": "369x-contracts",
+  "private": true,
+  "scripts": {
+    "build": "hardhat compile && node scripts/export-artifacts.js",
+    "test": "hardhat test"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-chai-matchers": "^2.1.2",
+    "@nomicfoundation/hardhat-ethers": "^3.1.3",
+    "@openzeppelin/contracts": "^5.1.0",
+    "@prb/math": "^4.1.0",
+    "chai": "^4.5.0",
+    "ethers": "^6.17.0",
+    "hardhat": "^2.29.1",
+    "solc": "^0.8.24"
+  }
+}

@@ -46,3 +46,14 @@ Push to GitHub, import the repo at vercel.com/new, and click Deploy. There are n
 ## Status
 **Demo mode** (`USE_MOCK: true`): everything works with test money saved in the visitor's browser.
 To accept real funds you need smart contracts + a backend. See `SETUP-TASKS.md` for what's next.
+
+## Smart contracts (BNB Smart Chain Testnet)
+`contracts/` holds the Solidity contracts (Hardhat project):
+- `TestToken.sol`: test USDT and test $369X with a 24-hour faucet
+- `Market369X.sol`: LMSR YES/NO markets: create (with $369X bond), buy, sell, resolve, redeem, creator fees
+
+```
+cd contracts && npm install && npm test     # 12 tests incl. a 300-trade solvency stress test
+npm run build                               # recompile + refresh deploy/artifacts.json
+```
+Deploy from the browser with MetaMask at `/deploy/` (no private keys needed).

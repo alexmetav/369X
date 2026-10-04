@@ -59,7 +59,7 @@ function renderNav(){
   const bal = ACC ? `<a class="bal-pill" href="#/portfolio"><b class="num">${num(ACC.stable, 2)}</b> ${S()}</a>` : "";
   const net = wallet.wrongChain ? `<button class="btn btn-sm net-warn" data-act="switchChain">Wrong network</button>` : "";
   slot.innerHTML = `${net}${bal}
-    <details class="wallet-menu"><summary class="btn btn-ghost btn-sm addr-pill"><span class="addr-dot"></span><span class="num">${short(a)}</span></summary>
+    <details class="wallet-menu"><summary class="btn btn-ghost btn-sm addr-pill"><span class="addr-dot"></span><span class="num">${esc(short(a))}</span></summary>
       <div class="menu right">
         <div class="bal-row"><span>${S()}</span><b class="num">${ACC ? num(ACC.stable, 2) : "…"}</b></div>
         <div class="bal-row"><span>${T()}</span><b class="num">${ACC ? num(ACC.token) : "…"}</b></div>
@@ -73,7 +73,13 @@ function renderNav(){
         <button data-act="disconnect">⏏ Disconnect</button>
       </div></details>`;
 }
-async function refreshAccount(){ ACC = wallet.address ? await api.getAccount(wallet.address).catch(() => null) : null; renderNav(); }
+let accSeq = 0;
+async function refreshAccount(){
+  const n = ++accSeq, a = wallet.address;
+  const acc = a ? await api.getAccount(a).catch(() => null) : null;
+  if(n !== accSeq || a !== wallet.address) return;          // a newer refresh (or a wallet switch) won
+  ACC = acc; renderNav();
+}
 async function onWalletChange(){ await refreshAccount(); if(CHAIN_ON && CONFIG.CONTRACTS.referral) inviteBanner(); route(); }
 
 function captureRef(){
@@ -81,7 +87,7 @@ function captureRef(){
   const ref = read(location.search) || read(location.hash);
   if(ref && !refBy()){ store.set("refBy", ref); api.trackClick(ref); }
   const by = refBy();
-  $("#refBanner").innerHTML = by ? `<div class="ref-banner"><div class="wrap"><span class="addr-dot"></span><span>Invited by <b>${esc(by)}</b>. You pay ${pct(CONFIG.REF_DISCOUNT)} less in trading fees.</span></div></div>` : "";
+  $("#refBanner").innerHTML = by ? `<div class="ref-banner"><div class="wrap"><span class="addr-dot"></span><span>Invited by <b>${esc(by)}</b>. ${CHAIN_ON ? `You get ${pct(CONFIG.REF_DISCOUNT)} of your trading fees back.` : `You pay ${pct(CONFIG.REF_DISCOUNT)} less in trading fees.`}</span></div></div>` : "";
   if(CHAIN_ON && CONFIG.CONTRACTS.referral) inviteBanner();
   $("#demoBanner").innerHTML = CONFIG.USE_MOCK
     ? `<div class="demo-banner"><div class="wrap"><b>Testnet demo</b><span>Prices, balances and payouts use test money and are saved only in this browser.</span><button data-act="resetDemo">Reset demo</button></div></div>`
@@ -118,7 +124,10 @@ async function inviteBanner(){
 async function pageHome(){
   const all = await api.getMarkets({ status: "all" }), live = all.filter(m => m.status === "live");
   const trending = await api.getMarkets({ sort: "trending" });
-  const f = [...live].sort((a, b) => b.vol - a.vol)[0] || all[0];
+  const f = [...live].sort((a, b) => b.vol - a.vol)[0];         // only a live market is featured
+  const empty = `<div class="dial-card" style="text-align:center"><div class="dial-top"><span>No live markets yet</span></div>
+      <p class="lede" style="margin:18px 0">Be the first: ask a question and earn ${pct(CONFIG.CREATOR_FEE, 1)} of every trade on it.</p>
+      <a class="btn btn-grad" href="#/create">Create a market</a></div>`;
   const vault = await api.getVault().catch(() => ({ tvl: 0 }));   // one failed read shouldn't break the home page
   return `
   <section class="hero"><div class="wrap hero-grid">
@@ -134,7 +143,7 @@ async function pageHome(){
     </div>
     <div class="stage" aria-label="Featured market">
       <div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div>
-      <div class="float-chip fc1"><span class="av"></span><span>${f.feed[0] ? short(f.feed[0].addr).slice(0, 6) + " bought <b>" + esc(f.feed[0].side) + "</b>" : "Create a market, earn <b>0.5%</b>"}</span></div>
+      ${f ? `      <div class="float-chip fc1"><span class="av"></span><span>${f.feed[0] ? short(f.feed[0].addr).slice(0, 6) + " bought <b>" + esc(f.feed[0].side) + "</b>" : "Create a market, earn <b>0.5%</b>"}</span></div>
       <div class="float-chip fc2">Creator earned <b class="num">+${money(f.creatorEarned)}</b></div>
       <div class="dial-card">
         <div class="dial-top"><span class="live">Live</span><span class="num">${compact(f.vol)} vol</span></div>
@@ -147,12 +156,13 @@ async function pageHome(){
         </div>
         <div class="yn"><a class="yes" href="${mHref(f.id, "?side=YES")}"><span>Yes</span><span class="num" id="dialYes">${cents(f.p)}</span></a><a class="no" href="${mHref(f.id, "?side=NO")}"><span>No</span><span class="num" id="dialNo">${cents(1 - f.p)}</span></a></div>
       </div>
+` : empty}
     </div>
   </div></section>
 
   <section class="section" style="padding-top:0"><div class="wrap">
     <div class="sec-head"><div><h2 class="h2">Trending now</h2><p class="lede">Where the money is moving right now.</p></div><a class="btn btn-ghost" href="#/markets">All markets</a></div>
-    <div class="grid">${trending.slice(0, 6).map(marketCard).join("")}</div>
+    <div class="grid">${trending.length ? trending.slice(0, 6).map(marketCard).join("") : `<div class="empty" style="grid-column:1/-1">No live markets right now.<br><a class="btn btn-ghost" href="#/create">Create the first one</a></div>`}</div>
   </div></section>
 
   <section class="section"><div class="wrap">
@@ -161,7 +171,7 @@ async function pageHome(){
       <a class="step" href="#/markets"><span class="n">TRADE</span><h3>Call outcomes</h3><p>Buy YES or NO on any live market. Sell any time before the end. Leverage up to 10× is coming soon.</p></a>
       <a class="step" href="#/create"><span class="n">CREATE</span><h3>Launch a market, earn 0.5%</h3><p>Ask a clear question. We seed the liquidity, you keep 0.5% of every trade on it for life.</p></a>
       <a class="step" href="#/vault"><span class="n">PROVIDE</span><h3>Fund the vault</h3><p>Deposit ${S()} into the protocol vault. Earn ${pct(CONFIG.LP_SHARE)} of protocol fees and up to 8× points.</p></a>
-      <a class="step" href="#/stake"><span class="n">STAKE</span><h3>Stake ${T()}</h3><p>Cut your fees by up to 50%, vote on outcomes and earn resolution rewards.</p></a>
+      <a class="step" href="#/stake"><span class="n">STAKE</span><h3>Stake ${T()}</h3><p>${CHAIN_ON ? `Earn ${pct(1 - CONFIG.LP_SHARE)} of protocol fees in ${S()}, vote on outcomes and earn voting rewards.` : "Cut your fees by up to 50%, vote on outcomes and earn resolution rewards."}</p></a>
     </div>
   </div></section>
 
@@ -179,7 +189,7 @@ async function pageHome(){
     <div class="panel aff-tease">
       <div>
         <h2 class="h2">Earn from every trade your friends make</h2>
-        <p class="lede">Share your link. You earn a share of the fees on everything your referrals trade, for as long as they trade, and they pay ${pct(CONFIG.REF_DISCOUNT)} less in fees.</p>
+        <p class="lede">Share your link. You earn a share of the fees on everything your referrals trade, for as long as they trade, and they ${CHAIN_ON ? `get ${pct(CONFIG.REF_DISCOUNT)} of their fees back` : `pay ${pct(CONFIG.REF_DISCOUNT)} less in fees`}.</p>
         <div class="hero-cta"><a class="btn btn-grad" href="#/affiliate">Open affiliate dashboard</a></div>
       </div>
       <div class="tiers">${tierRows(null)}</div>
@@ -203,8 +213,11 @@ async function pageMarkets(){
     <div class="grid" id="mgrid"></div>
   </div></section>`;
 }
+let fillSeq = 0;
 async function fillMarkets(){
+  const n = ++fillSeq;
   const list = await api.getMarkets({ category: mState.cat, q: mState.q, status: mState.status, sort: mState.sort });
+  if(n !== fillSeq) return;                                  // the user changed the filter meanwhile
   const g = $("#mgrid"); if(!g) return;
   g.innerHTML = list.length ? list.map(marketCard).join("") : `<div class="empty" style="grid-column:1/-1">No markets match. Try a different word, category or status.<br><a class="btn btn-ghost" href="#/create">Create this market</a></div>`;
 }
@@ -220,7 +233,7 @@ async function pageMarket(id, query){
   return `<section class="page-head"><div class="wrap">
     <div class="crumbs"><a href="#/markets">Markets</a> / ${esc(m.cat)}</div>
     <div class="mk-grid">
-      <div>
+      <div class="mk-main">
         <div class="panel pad">
           <div class="mk-title"><div class="micon">${esc(m.icon)}</div><div><h1>${esc(m.q)}</h1>
             <div class="mk-meta">${statusTag(m)}<span>${esc(m.cat)}</span>·<span>${m.status === "live" ? "Ends" : "Ended"} ${fmtDate(m.ends)}</span>${m.maxLev > 1 ? `<span class="lev-badge">Up to ${m.maxLev}×</span>` : ""}</div></div></div>
@@ -265,11 +278,11 @@ function chainVoteBox(m){
       <p class="muted">Winning shares pay 1 ${S()} each. Redeem them from your portfolio.</p>${tot ? bar : ""}
       ${my ? `<div class="info">You voted <b>${esc(my.side)}</b> with ${tok(my.weight)}.</div>` : ""}
       ${won && !m.finalized ? `<button class="btn btn-ghost" style="width:100%;margin-top:12px" data-act="finalize" data-id="${esc(m.id)}">Record result to unlock your reward</button>` : ""}
-      ${won && m.finalized && !my.claimed ? `<button class="btn btn-grad" style="width:100%;margin-top:12px" data-act="claimVote" data-id="${esc(m.id)}">Claim ${tok(my.weight * 0.01)} reward</button>` : ""}
+      ${won && m.finalized && !my.claimed ? `<button class="btn btn-grad" style="width:100%;margin-top:12px" data-act="claimVote" data-id="${esc(m.id)}">Claim ${tok(my.weight * (Chain.voteRewardBps ?? 100) / 10000)} reward</button>` : ""}
       ${won && my.claimed ? `<p class="side-note">Reward claimed.</p>` : ""}</div>`;
   }
   return `<div class="panel pad"><h2 class="h3">Vote on the result</h2>
-    <p class="muted" style="margin-top:6px">Trading has ended. ${T()} stakers vote using <b>${esc(m.source)}</b>. ${open ? "Voting closes " + new Date(m.voteEnds).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) + "." : "Voting has closed."} Correct voters earn 1% of their stake.</p>
+    <p class="muted" style="margin-top:6px">Trading has ended. ${T()} stakers vote using <b>${esc(m.source)}</b>. ${open ? "Voting closes " + new Date(m.voteEnds).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) + "." : "Voting has closed."} ${Chain.voteRewardBps ? `Correct voters earn ${(Chain.voteRewardBps / 100).toString()}% of their stake.` : ""}</p>
     ${bar}
     ${my ? `<div class="info">You voted <b>${esc(my.side)}</b> with ${tok(my.weight)}.</div>`
       : open ? (ACC?.staked > 0 ? `<div class="yn"><button class="yes" data-act="vote" data-id="${esc(m.id)}" data-side="YES"><span>Vote YES</span></button><button class="no" data-act="vote" data-id="${esc(m.id)}" data-side="NO"><span>Vote NO</span></button></div>`
@@ -300,6 +313,8 @@ function resolveBox(m){
   </div>`;
 }
 
+// the user used for quotes: on-chain the fee is always the full rate (invited users get a rebate later instead)
+const quoteUser = () => ACC || (CHAIN_ON ? { ...Engine.blankUser(), feeRate: CONFIG.CREATOR_FEE + CONFIG.PROTOCOL_FEE } : Engine.blankUser());
 function renderTrade(){
   const box = $("#tradeBox"); if(!box) return;
   const { m, side, margin, lev } = tState;
@@ -320,7 +335,7 @@ function renderTrade(){
 }
 function updateQuote(){
   const { m, side, margin, lev } = tState; if(!$("#summary")) return;
-  const q = Engine.quote(m, ACC || Engine.blankUser(), side, margin, lev, refBy());
+  const q = Engine.quote(m, quoteUser(), side, margin, lev, refBy());
   const profit = q.shares - q.borrowed - margin;
   $("#summary").innerHTML = `
     ${lev > 1 ? `<div><span>Position size</span><b class="num">${money(q.size, 2)}</b></div><div><span>Borrowed from vault</span><b class="num">${money(q.borrowed, 2)}</b></div>` : ""}
@@ -336,7 +351,7 @@ function updateQuote(){
   else { b.textContent = `Buy ${side}${lev > 1 ? " · " + lev + "×" : ""}`; b.dataset.act = "buy"; }
   $("#tradeNote").innerHTML = lev > 1
     ? `<span style="color:#ffd88a">Leverage multiplies gains and losses. If the price hits the liquidation level you lose your ${money(margin, 2)}.</span>`
-    : (refBy() ? `Referral discount applied: ${pct(CONFIG.REF_DISCOUNT)} off fees.` : "Prices update as others trade. You can sell before the market ends.");
+    : (refBy() ? (CHAIN_ON ? `Invited: ${pct(CONFIG.REF_DISCOUNT)} of this fee comes back to you as a rebate (claim it on the Affiliate page).` : `Referral discount applied: ${pct(CONFIG.REF_DISCOUNT)} off fees.`) : "Prices update as others trade. You can sell before the market ends.");
 }
 async function refreshMarket(){
   if(!tState.m || !$("#mkChart")) return;
@@ -373,10 +388,11 @@ async function pageCreate(){
         <div class="field" style="margin-top:0"><label for="cq">Question</label><textarea class="input" id="cq" maxlength="140" placeholder="Will ... happen by ...?"></textarea><small class="muted" style="font-size:12px">Start with "Will", end with "?". Be specific about the date and the number.</small></div>
         <div class="form-grid">
           <div class="field"><label for="ccat">Category</label><select class="input" id="ccat">${CATS.slice(1).map(c => `<option>${c}</option>`).join("")}</select></div>
-          <div class="field"><label for="cend">End date</label><input class="input" id="cend" type="date" min="${addDays(1)}" value="${addDays(30)}"></div>
+          <div class="field"><label for="cend">End date</label><input class="input" id="cend" type="date" min="${addDays(1)}" ${CHAIN_ON ? `max="${addDays(729)}"` : ""} value="${addDays(30)}"></div>
         </div>
         <div class="field"><label for="csrc">Resolution source</label><input class="input" id="csrc" placeholder="e.g. CoinGecko BTC/USD price, AP race call, official league site"></div>
-        <div class="field"><label for="crules">Rules</label><textarea class="input" id="crules" placeholder="Resolves YES if ... Otherwise resolves NO."></textarea></div>
+        ${CHAIN_ON ? `<div class="info" style="margin-top:14px">Rules are written for you: <b>YES</b> if the source confirms it by the end date (UTC), otherwise <b>NO</b>. Put any detail in the question itself.</div>`
+          : `<div class="field"><label for="crules">Rules</label><textarea class="input" id="crules" placeholder="Resolves YES if ... Otherwise resolves NO."></textarea></div>`}
         <div class="field"><label for="cp" style="display:flex;justify-content:space-between"><span>Starting chance of YES</span><b class="num" id="cpv" style="color:var(--text)">50%</b></label><input id="cp" type="range" min="5" max="95" value="50"></div>
         <div class="info">Bond: <b>${tok(CONFIG.CREATE_BOND)}</b>, returned when the market resolves cleanly. Your balance: <b>${ACC ? tok(ACC.token) : "…"}</b>.</div>
         <div class="err" id="cerr"></div>
@@ -401,7 +417,7 @@ async function pagePortfolio(){
   if(!wallet.address) return connectPrompt("Connect your wallet to see your positions.");
   const a = ACC; if(!a) return connectPrompt("Could not load your account.");
   const open = a.positions.reduce((s, p) => s + Math.max(0, p.equity), 0), unreal = a.positions.reduce((s, p) => s + p.pnl, 0);
-  const canFaucet = Date.now() > a.faucetAt + CONFIG.FAUCET_COOLDOWN_H * 36e5;
+  const canFaucet = nowMs() > a.faucetAt + CONFIG.FAUCET_COOLDOWN_H * 36e5;
   return `<section class="page-head"><div class="wrap">
     ${head("Portfolio", "", `<button class="btn ${canFaucet ? "btn-grad" : "btn-ghost"}" data-act="faucet">💧 ${canFaucet ? "Get test funds" : "Faucet used today"}</button>`)}
     <div class="stat-grid">
@@ -443,7 +459,7 @@ async function pageVault(){
         <div class="field"><label>Lock period</label><div class="lock-opts">${CONFIG.LOCKS.map(x => `<button class="${x.id === vState.lock ? "on" : ""}" data-act="lock" data-v="${x.id}"><b>${x.mult}×</b><small>${x.label}</small></button>`).join("")}</div></div>
         <div class="summary" id="vsum"></div>
         <button class="btn btn-grad" style="width:100%;margin-top:18px;height:48px" data-act="deposit">Deposit</button>
-        <p class="side-note">${L.days ? `Locked deposits can't be withdrawn until the unlock date.` : "Flex deposits can be withdrawn any time, as long as the vault isn't fully lent out."}</p>`}
+        <p class="side-note">${L.days ? `Locked deposits can't be withdrawn until the unlock date.` : (CHAIN_ON ? "Flex deposits can be withdrawn any time." : "Flex deposits can be withdrawn any time, as long as the vault isn't fully lent out.")}</p>`}
       </div>
       <div class="panel pad">
         <h2 class="h3">Your deposits</h2>
@@ -464,6 +480,7 @@ function updateVaultSum(){
 
 /* ---------- stake ---------- */
 async function pageStakeChain(){
+  if(wallet.address && !ACC) return connectPrompt("Couldn't load your account from the blockchain. Please refresh in a moment.");
   const a = ACC, isStake = vState.stakeTab === "stake", locked = a && a.lockedUntil > nowMs();
   return `<section class="page-head"><div class="wrap">
     ${head("Stake " + T(), `Stakers earn ${pct(1 - CONFIG.LP_SHARE)} of protocol fees in ${S()}, vote on how markets resolve, and earn ${T()} for voting with the final outcome.`, `<a class="btn btn-ghost" href="#/resolve">Resolution queue</a>`)}
@@ -486,7 +503,7 @@ async function pageStakeChain(){
       <div class="panel pad"><h2 class="h3">What staking does</h2><div class="feed" style="margin-top:8px">
         <div><span>💸 Share of protocol fees</span><b>${pct(1 - CONFIG.LP_SHARE)}, in ${S()}</b></div>
         <div><span>🛡 Vote on market results</span><b>1 token = 1 vote</b></div>
-        <div><span>🎯 Reward for correct votes</span><b>1% of your stake</b></div>
+        <div><span>🎯 Reward for correct votes</span><b>${Chain.voteRewardBps === null ? "A share of your stake" : Chain.voteRewardBps ? pct(Chain.voteRewardBps / 10000, 2).replace(/\.00%$/, "%") + " of your stake" : "Paused for now"}</b></div>
         <div><span>🏷 Trading fee discounts</span><b class="muted">Next market upgrade</b></div>
       </div><p class="side-note">After you vote, your stake stays locked until that market's voting closes, so nobody can vote twice with the same tokens.</p></div>
     </div>
@@ -540,6 +557,7 @@ async function pageResolve(){
 /* ---------- rewards ---------- */
 async function pageRewards(){
   if(!wallet.address) return connectPrompt("Connect your wallet to see your points and badges.");
+  if(!ACC) return connectPrompt("Couldn't load your account. Please refresh in a moment.");
   const a = ACC, parts = Object.entries(a.points.parts), max = Math.max(1, ...parts.map(p => p[1]));
   return `<section class="page-head"><div class="wrap">
     ${head("Rewards", `Earn points by trading, providing liquidity, staking, creating markets and inviting friends. Points are planned to convert into ${T()} at launch.`)}
@@ -549,9 +567,11 @@ async function pageRewards(){
         <div style="display:grid;gap:10px;margin-top:20px">${parts.map(([k, v]) => `<div><div style="display:flex;justify-content:space-between;font-size:13px"><span class="muted">${k}</span><span class="num">${num(v)}</span></div><div class="progress" style="margin-top:6px"><i style="width:${(v / max * 100).toFixed(1)}%"></i></div></div>`).join("")}</div>
       </div>
       <div class="panel pad"><h2 class="h3">How to earn points</h2><div class="feed" style="margin-top:8px">
-        <div><span>Trade</span><b>1 pt per $1 of size</b></div><div><span>Vault deposit</span><b>1–8 pts per $1 per day</b></div>
+        ${CHAIN_ON ? `<div><span>Trade</span><b>1 pt per $1 traded</b></div><div><span>Vault deposit</span><b>1–8 pts per $1 per day</b></div>
+        <div><span>Each badge</span><b>500 pts</b></div><div><span>Staking, voting, creating, referrals</span><b class="muted">Counted from the next upgrade</b></div>`
+        : `<div><span>Trade</span><b>1 pt per $1 of size</b></div><div><span>Vault deposit</span><b>1–8 pts per $1 per day</b></div>
         <div><span>Stake ${T()}</span><b>0.1 pt per token per day</b></div><div><span>Create a market</span><b>1,000 pts</b></div>
-        <div><span>Vote correctly</span><b>250 pts + 1% of stake</b></div><div><span>Referrals</span><b>10% of their volume</b></div><div><span>Each badge</span><b>500 pts</b></div>
+        <div><span>Vote correctly</span><b>250 pts + 1% of stake</b></div><div><span>Referrals</span><b>10% of their volume</b></div><div><span>Each badge</span><b>500 pts</b></div>`}
       </div></div>
     </div>
     <div class="panel pad" style="margin-top:16px"><h2 class="h3">Badges (${a.badges.filter(b => b.got).length}/${a.badges.length})</h2>
@@ -586,7 +606,7 @@ async function pageAffiliate(){
   const site = location.protocol.startsWith("http") ? location.origin : CONFIG.SITE_URL;
   const link = a.code ? `${site}/?ref=${a.code}` : "";
   const max = Math.max(0.01, ...a.earnings);
-  const days = a.earnings.map((_, i) => { const d = new Date(); d.setDate(d.getDate() - (a.earnings.length - 1 - i)); return d.getDate(); });
+  const days = a.earnings.map((_, i) => new Date(nowMs() - (a.earnings.length - 1 - i) * 864e5).getUTCDate());   // UTC days, same as the earnings data
   const msg = `I'm calling outcomes on ${CONFIG.SITE_NAME}. Join with my link and pay ${pct(CONFIG.REF_DISCOUNT)} less in fees: `;
   return `<section class="page-head"><div class="wrap">
     ${head("Affiliate dashboard", `You're on the <b style="color:var(--text)">${tier.name}</b> tier, earning ${pct(tier.rate)} of fees from direct referrals and 5% from theirs.`)}
@@ -619,7 +639,7 @@ async function pageAffiliate(){
       </div>
     </div>
     <div class="aff-top">
-      <div class="panel pad"><h2 class="h3">Daily earnings</h2><p class="muted">Last 14 days</p>
+      <div class="panel pad"><h2 class="h3">Daily earnings</h2><p class="muted">Last 14 days (UTC)</p>
         <div class="bars">${a.earnings.map(e => `<div style="height:${(e / max) * 100}%" title="${money(e, 2)}"></div>`).join("")}</div>
         <div class="bars-x">${days.map(d => `<span>${d}</span>`).join("")}</div></div>
       <div class="panel pad"><h2 class="h3">Commission tiers</h2><p class="muted">Based on total referred volume</p><div class="tiers" style="margin-top:14px">${tierRows(a.stats.volume)}</div></div>
@@ -644,7 +664,7 @@ async function pageToken(){
     <div class="stat-grid">
       <div class="panel stat"><small>Total supply</small><b class="num">${compactN(CONFIG.TOKEN_SUPPLY)}</b></div>
       <div class="panel stat"><small>Network</small><b>BNB Chain</b><em>BEP-20</em></div>
-      <div class="panel stat"><small>Contract</small><b style="font-size:16px">${CONFIG.TOKEN_ADDRESS ? `<button data-act="copy" data-v="${esc(CONFIG.TOKEN_ADDRESS)}">${short(CONFIG.TOKEN_ADDRESS)}</button>` : "Coming soon"}</b></div>
+      <div class="panel stat"><small>Contract</small><b style="font-size:16px">${CONFIG.TOKEN_ADDRESS ? `<button data-act="copy" data-v="${esc(CONFIG.TOKEN_ADDRESS)}">${esc(short(CONFIG.TOKEN_ADDRESS))}</button>` : "Coming soon"}</b></div>
       <div class="panel stat"><small>Airdrop</small><b class="num">${alloc[0][1]}%</b><em>for testnet users</em></div>
     </div>
     <div class="two">
@@ -653,9 +673,13 @@ async function pageToken(){
         <div class="legend">${alloc.map(([n, p, c]) => `<div><i style="background:${c}"></i>${esc(n)}<b class="num">${p}%</b></div>`).join("")}</div></div>
         <p class="side-note">Placeholder numbers. Final tokenomics will be published before launch.</p></div>
       <div class="panel pad"><h2 class="h3">What ${T()} does</h2><div class="feed" style="margin-top:8px">
-        <div><span>💸 Fee discounts</span><b>Up to 50% off</b></div><div><span>🛡 Resolution voting</span><b>Earn rewards</b></div>
+        ${CHAIN_ON ? `<div><span>💸 Staking: share of protocol fees</span><b>${pct(1 - CONFIG.LP_SHARE)}, in ${S()}</b></div><div><span>🛡 Resolution voting</span><b>1 token = 1 vote</b></div>
+        <div><span>🏗 Market creation bond</span><b>${num(CONFIG.CREATE_BOND)} ${T()}</b></div><div><span>🏷 Fee discounts</span><b class="muted">Planned</b></div>
+        <div><span>🗳 Governance</span><b class="muted">Planned</b></div></div>
+        <p class="side-note">This is a free test token on BNB testnet. It has no value.</p></div>`
+        : `<div><span>💸 Fee discounts</span><b>Up to 50% off</b></div><div><span>🛡 Resolution voting</span><b>Earn rewards</b></div>
         <div><span>🏗 Market creation bond</span><b>${num(CONFIG.CREATE_BOND)} ${T()}</b></div><div><span>🗳 Governance</span><b>Vote on fees & listings</b></div>
-        <div><span>🌱 Liquidity mining</span><b>Vault rewards</b></div></div></div>
+        <div><span>🌱 Liquidity mining</span><b>Vault rewards</b></div></div></div>`}
     </div>
   </div></section>`;
 }
@@ -666,17 +690,34 @@ async function pageDocs(){
     ["start", "Getting started", `<p>1. Install a wallet app like MetaMask or Trust Wallet. 2. Click <b>Connect wallet</b>; we switch you to ${esc(CONFIG.CHAIN.chainName)} automatically. 3. Open the wallet menu and click <b>Get test funds</b> for ${num(CONFIG.FAUCET_STABLE)} test ${S()} and ${num(CONFIG.FAUCET_TOKEN)} test ${T()}. 4. Pick a market and buy YES or NO.</p>`],
     ["prices", "How prices work", `<p>Prices come from an automated market maker called <b>LMSR</b> (Logarithmic Market Scoring Rule). It always quotes a price, so you never wait for someone to take the other side. YES + NO always add up to $1. Buying YES pushes the YES price up; the size of the move depends on the market's liquidity depth.</p><p>The protocol's worst-case loss per market is capped at <code>b × ln 2</code>, where <code>b</code> is the liquidity setting. That makes it safe to seed every new market automatically.</p>`],
     ["leverage", "Leverage (coming soon)", `<p><b>Leverage is not live yet.</b> When it launches, it will let you open a bigger position than your deposit. At 5× a $100 deposit opens a $500 position; the extra $400 is borrowed from the vault.</p><ul><li>Available leverage depends on market volume: ${CONFIG.LEVERAGE_TIERS.map(([l, v]) => `${l}× from ${compact(v)}`).join(", ")}.</li><li>If your position's value minus the borrowed amount falls below ${pct(CONFIG.MAINTENANCE)} of its size, it is <b>liquidated</b> and you lose your deposit.</li><li>Positions from ${money(CONFIG.LEVERAGE_MIN)} to ${money(CONFIG.LEVERAGE_MAX)} at launch.</li><li>The liquidation price is shown before you trade.</li></ul><p><a href="#/leverage" style="color:var(--cyan)">Try the leverage simulator →</a></p>`],
-    ["fees", "Fees", `<p>Each trade pays ${pct(CONFIG.CREATOR_FEE + CONFIG.PROTOCOL_FEE, 1)} of its size: ${pct(CONFIG.CREATOR_FEE, 1)} to the market creator and ${pct(CONFIG.PROTOCOL_FEE, 1)} to the protocol. ${pct(CONFIG.LP_SHARE)} of the protocol fee goes to vault depositors. Staking ${T()} cuts fees by up to 50%, and invited users get ${pct(CONFIG.REF_DISCOUNT)} off.</p>`],
+    ["fees", "Fees", `<p>Each trade pays ${pct(CONFIG.CREATOR_FEE + CONFIG.PROTOCOL_FEE, 1)} of its size: ${pct(CONFIG.CREATOR_FEE, 1)} to the market creator and ${pct(CONFIG.PROTOCOL_FEE, 1)} to the protocol. ${pct(CONFIG.LP_SHARE)} of the protocol fee goes to vault depositors${CHAIN_ON ? ` and the rest to ${T()} stakers. Invited users get ${pct(CONFIG.REF_DISCOUNT)} of their fees back as a rebate, and the person who invited them earns ${CONFIG.REF_TIERS.map(t => pct(t.rate)).join("/")} of the protocol fee (buys only; trades in your own or your referrer's markets don't count). Fee discounts for stakers are planned.</p>` : `. Staking ${T()} cuts fees by up to 50%, and invited users get ${pct(CONFIG.REF_DISCOUNT)} off.</p>`}`],
     ["create", "Creating markets", `<p>Anyone can create a market by posting a ${num(CONFIG.CREATE_BOND)} ${T()} bond. The protocol seeds the liquidity, so creators take no market-making risk and earn ${pct(CONFIG.CREATOR_FEE, 1)} of every trade for the life of the market. The bond comes back when the market resolves cleanly; unclear or abusive markets can lose it.</p>`],
     ["vault", "Vault", `<p>Vault depositors provide ${S()} liquidity to the protocol (and, once leverage launches, the money leveraged traders borrow). In return they earn ${pct(CONFIG.LP_SHARE)} of protocol fees. Choose a lock period: ${CONFIG.LOCKS.map(l => `${l.label} (${l.mult}× points)`).join(", ")}. Longer locks earn points faster.</p>`],
-    ["resolve", "Resolution", `<p>When a market ends it moves to <b>Resolving</b>. ${T()} stakers vote YES or NO based on the listed resolution source. Votes are weighted by stake. Voters on the final outcome earn rewards. Winning shares then pay $1 each and positions settle automatically.</p>`],
+    ["resolve", "Resolution", `<p>When a market ends it moves to <b>Resolving</b>. ${T()} stakers vote YES or NO based on the listed resolution source. Votes are weighted by stake. Voters on the final outcome earn rewards. ${CHAIN_ON ? "Once the result is final, open your Portfolio and press <b>Redeem</b>: each winning share pays $1." : "Winning shares then pay $1 each and positions settle automatically."}</p>`],
     ["points", "Points & badges", `<p>Points track how much you use ${CONFIG.SITE_NAME}: trading, vault deposits, staking, creating markets, correct votes, referrals and badges. Points are planned to convert into ${T()} at launch; the exact formula will be announced.</p>`],
-    ["risks", "Risks", `<ul><li>You can lose everything you put into a trade, and leverage makes losses faster.</li><li>Smart contracts can have bugs.</li><li>Resolution relies on voters reading the source correctly.</li><li>Prediction markets may be restricted where you live. Check your local laws.</li></ul>`]
+    ["risks", "Risks", `<ul><li>You can lose everything you put into a trade, and leverage makes losses faster.</li><li>Smart contracts can have bugs.</li><li>Resolution relies on voters reading the source correctly.</li><li>Prediction markets may be restricted where you live. Check your local laws.</li></ul><p>Read the full <a href="#/legal" style="color:var(--cyan)">Terms, Privacy and Risk notice</a>.</p>`]
   ];
   return `<section class="page-head"><div class="wrap">
     ${head("Docs", `Everything you need to know about ${CONFIG.SITE_NAME}.`)}
     <div class="docs"><nav>${sec.map(([id, t]) => `<a href="#/docs" data-act="jump" data-v="${id}">${t}</a>`).join("")}</nav>
     <article class="panel pad">${sec.map(([id, t, b]) => `<h2 id="d-${id}">${t}</h2>${b}`).join("")}</article></div>
+  </div></section>`;
+}
+
+/* ---------- legal ---------- */
+async function pageLegal(){
+  const sec = [
+    ["terms", "Terms of use", `<p>${esc(CONFIG.SITE_NAME)} is test software running on ${esc(CONFIG.CHAIN.chainName)}. Every token used here (test ${S()}, test ${T()} and tBNB) is free and has <b>no monetary value</b>. Nothing on this site is an offer to sell or buy anything of value, investment advice, or a promise of a future token or reward.</p>
+      <p>The site is provided "as is", without warranty. Features, numbers and contracts can change or be reset at any time while we test. Points and badges are a record of activity and give no right to anything.</p>
+      <p>Don't create markets about private people, violence, or anything illegal. Such markets can be removed and their bond lost. You are responsible for following the laws where you live; prediction markets are restricted in some countries.</p>`],
+    ["privacy", "Privacy", `<p>We don't ask for your name, email or any account. Your wallet address and your transactions are public on the blockchain, as on every public chain. This site stores a few settings (your connected wallet, an invite code, a cache of blockchain data) in your own browser only; clearing site data removes them.</p>
+      <p>Pages are served by our hosting provider, and blockchain reads go through public RPC providers. Like any website, they can see your IP address. We don't use advertising or tracking cookies.</p>`],
+    ["risk", "Risk notice", `<ul><li>You can lose everything you put into a trade.</li><li>Smart contracts can have bugs, and the contracts here have not been audited yet.</li><li>Market results are decided by ${T()} staker votes and can be wrong.</li><li>Your wallet and its secret recovery phrase are your responsibility. Nobody from ${esc(CONFIG.SITE_NAME)} will ever ask for your recovery phrase or private key.</li></ul>`]
+  ];
+  return `<section class="page-head"><div class="wrap">
+    ${head("Legal", `Terms, privacy and risks of using ${esc(CONFIG.SITE_NAME)}.`)}
+    <div class="docs"><nav>${sec.map(([id, t]) => `<a href="#/legal" data-act="jump" data-v="${id}">${t}</a>`).join("")}</nav>
+    <article class="panel pad">${sec.map(([id, t, b]) => `<h2 id="d-${id}">${t}</h2>${b}`).join("")}<p class="side-note">Last updated ${fmtDate("2026-10-04")}.</p></article></div>
   </div></section>`;
 }
 
@@ -767,7 +808,7 @@ function setDial(v){
    ROUTER
    ===================================================================== */
 const PAGES = { home: pageHome, markets: pageMarkets, leverage: pageLeverage, market: pageMarket, create: pageCreate, portfolio: pagePortfolio, vault: pageVault, stake: pageStake,
-  resolve: pageResolve, rewards: pageRewards, leaderboard: pageLeaderboard, affiliate: pageAffiliate, token: pageToken, docs: pageDocs, more: pageMore };
+  resolve: pageResolve, rewards: pageRewards, leaderboard: pageLeaderboard, affiliate: pageAffiliate, token: pageToken, docs: pageDocs, legal: pageLegal, more: pageMore };
 const MORE = ["create", "stake", "resolve", "affiliate", "token", "docs"];
 
 let routeSeq = 0;
@@ -826,7 +867,12 @@ const ACTIONS = {
   resetDemo(){ if(confirm("Reset all demo data in this browser?")){ api.resetDemo(); ACC = null; location.hash = "#/"; location.reload(); } },
   async faucet(el){
     if(!wallet.address) return wallet.connect();
-    await busy(el, "Sending…", async () => { await api.faucet(wallet.address); toast(`Received ${num(CONFIG.FAUCET_STABLE)} ${S()} + ${num(CONFIG.FAUCET_TOKEN)} ${T()}`); await refreshAccount(); route(true); });
+    await busy(el, "Sending…", async () => {
+      const r = await api.faucet(wallet.address) || {};
+      const st = r.stable ?? CONFIG.FAUCET_STABLE, tk = r.token ?? CONFIG.FAUCET_TOKEN;
+      toast("Received " + [st ? `${num(st)} ${S()}` : "", tk ? `${num(tk)} ${T()}` : ""].filter(Boolean).join(" + "));
+      await refreshAccount(); route(true);
+    });
   },
   setCat(el){ mState.cat = el.dataset.v; $$(".chip").forEach(b => b.classList.toggle("on", b.dataset.v === mState.cat)); fillMarkets(); },
   side(el){ tState.side = el.dataset.v; renderTrade(); },
@@ -835,26 +881,32 @@ const ACTIONS = {
   async buy(el){
     if(tState.margin < 1) return toast("Enter at least $1", true);
     await busy(el, "Placing order…", async () => {
-      const q = Engine.quote(tState.m, ACC || Engine.blankUser(), tState.side, tState.margin, tState.lev, refBy());
+      const q = Engine.quote(tState.m, quoteUser(), tState.side, tState.margin, tState.lev, refBy());
       await api.placeTrade({ marketId: tState.m.id, side: tState.side, margin: tState.margin, lev: tState.lev, wallet: wallet.address, ref: refBy(), minShares: q.shares * 0.97 });
       toast(`Bought ${tState.side}${tState.lev > 1 ? " at " + tState.lev + "×" : ""}`);
       await refreshAccount(); route(true);
     });
   },
   async close(el){
+    if(api.quoteSell){
+      let q; try{ q = await api.quoteSell({ id: el.dataset.id }); }catch(e){ return toast(e.message || "Couldn't get a price", true); }
+      if(!q.shares) return toast("No shares to sell", true);
+      if(!confirm(`Sell ${num(q.shares, 2)} ${el.dataset.id.split(":")[1]} shares for about ${money(q.out, 2)} (fee ${money(q.fee, 2)})?\n\nThe final amount can be up to 3% lower if the price moves.`)) return;
+    }
     await busy(el, "Closing…", async () => { const r = await api.closePosition({ id: el.dataset.id, wallet: wallet.address }); toast("Closed. You received " + money(r.received, 2)); await refreshAccount(); route(true); });
   },
   async createMarket(el){
     const q = $("#cq").value.trim().replace(/\s+/g, " "), src = $("#csrc").value.trim(), ends = $("#cend").value, err = $("#cerr");
-    let rules = $("#crules").value.trim();
+    let rules = ($("#crules")?.value || "").trim();
     if(q.length < 15 || !q.endsWith("?")) return err.textContent = "Write a full question of at least 15 characters that ends with a question mark.";
     if(!ends || ends <= today()) return err.textContent = "Pick an end date in the future.";
+    if(CHAIN_ON && ends > addDays(729)) return err.textContent = "Pick an end date within 2 years.";
     if(src.length < 4) return err.textContent = "Add a resolution source people can check.";
     if(!rules) rules = `Resolves YES if this happens by ${fmtDate(ends)} according to ${src}. Otherwise resolves NO.`;
     err.textContent = "";
     await busy(el, "Creating…", async () => {
       const m = await api.createMarket({ wallet: wallet.address, q, cat: $("#ccat").value, ends, source: src, rules, p: +$("#cp").value / 100 });
-      toast("Market created"); await refreshAccount(); location.hash = mHref(m.id);
+      toast("Market created"); await refreshAccount(); location.hash = m.id != null ? mHref(m.id) : "#/markets";
     });
   },
   lock(el){ vState.lock = el.dataset.v; $$(".lock-opts button").forEach(b => b.classList.toggle("on", b.dataset.v === vState.lock)); updateVaultSum(); },
@@ -866,7 +918,7 @@ const ACTIONS = {
     await busy(el, "…", async () => { const r = await api.withdraw({ wallet: wallet.address, id: el.dataset.id }); toast("Withdrew " + money(r.amount, 2)); await refreshAccount(); route(true); });
   },
   stakeTab(el){ vState.stakeTab = el.dataset.v; route(true); },
-  stakeMax(){ $("#samt").value = Math.floor(vState.stakeTab === "stake" ? ACC.token : ACC.staked); },
+  stakeMax(){ if(!ACC) return; $("#samt").value = Math.floor(vState.stakeTab === "stake" ? ACC.token : ACC.staked); },
   async stake(el){
     const amount = +$("#samt").value || 0; if(amount <= 0) return toast("Enter an amount", true);
     await busy(el, "Staking…", async () => { await api.stake({ wallet: wallet.address, amount }); toast("Staked " + tok(amount)); await refreshAccount(); route(true); });

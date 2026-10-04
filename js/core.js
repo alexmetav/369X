@@ -4,7 +4,7 @@
 const store = {
   pre: "369x:v2:",
   get(k, d){ try{ const v = localStorage.getItem(this.pre + k); return v ? JSON.parse(v) : d; }catch(e){ return d; } },
-  set(k, v){ try{ localStorage.setItem(this.pre + k, JSON.stringify(v)); }catch(e){} },
+  set(k, v){ try{ localStorage.setItem(this.pre + k, JSON.stringify(v)); return true; }catch(e){ return false; } },   // false = storage full or blocked
   del(k){ try{ localStorage.removeItem(this.pre + k); }catch(e){} }
 };
 
@@ -40,7 +40,7 @@ let toastT;
 function toast(msg, bad){
   const t = $("#toast");
   t.innerHTML = `<span class="addr-dot" style="${bad ? "background:var(--no);box-shadow:0 0 10px var(--no)" : ""}"></span>${esc(msg)}`;
-  t.classList.add("show"); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("show"), 2800);
+  t.classList.add("show"); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("show"), bad ? 6000 : Math.min(6000, 2800 + String(msg).length * 25));
 }
 async function copyText(text, label = "Copied"){
   try{ await navigator.clipboard.writeText(text); toast(label); }catch(e){ prompt("Copy this:", text); }

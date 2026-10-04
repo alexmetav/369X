@@ -31,8 +31,11 @@ async function events(market, ref) {
     try { ev = market.interface.parseLog(l); } catch (e) {}
     if (!ev) try { ev = ref.interface.parseLog(l); } catch (e) {}
     if (!ev) continue;
-    if (ev.name === "Trade") out.push({ kind: "trade", block: l.blockNumber, logIndex: l.index, user: ev.args.user, fee: ev.args.fee, amount: ev.args.amount });
-    if (ev.name === "ReferrerSet") out.push({ kind: "ref", block: l.blockNumber, logIndex: l.index, user: ev.args.user, referrer: ev.args.referrer });
+    const base = { block: l.blockNumber, logIndex: l.index };
+    if (ev.name === "Trade") out.push({ ...base, kind: "trade", user: ev.args.user, id: Number(ev.args.id), buy: ev.args.buy, fee: ev.args.fee, amount: ev.args.amount });
+    if (ev.name === "MarketCreated") out.push({ ...base, kind: "created", id: Number(ev.args.id), user: ev.args.creator });
+    if (ev.name === "ReferrerSet") out.push({ ...base, kind: "ref", user: ev.args.user, referrer: ev.args.referrer });
+    if (ev.name === "RewardsPublished") out.push({ ...base, kind: "published", root: ev.args.root, snap: ev.args.snapshotBlock });
   }
   return out;
 }
@@ -109,7 +112,7 @@ describe("Referral369X", () => {
     await market.connect(bob).buy(0, true, E(30_000), 0);   // counted at 20%, volume now 30k (Pro tier from 25k)
     await market.connect(bob).sell(0, true, (await market.yesShares(0, bob)) / 2n, 0); // counted at 25%
     const evs = await events(market, ref), trades = evs.filter(e => e.kind === "trade");
-    const r = Referral.compute(evs, CONFIG);
+    const r = Referral.compute(evs, CONFIG, { rules: "v1" });          // v1 still paid on sells
     const p = (fee) => Number(ethers.formatEther(fee)) * 100 / 150;
     const expected = p(trades[0].fee) * 0.20 + p(trades[1].fee) * 0.25;
     expect(F(r.owed.get(alice.address.toLowerCase()))).to.be.closeTo(expected, 1e-9);
@@ -121,5 +124,56 @@ describe("Referral369X", () => {
     await usdt.transfer(ref, E(5));
     await ref.publish(t.root, await ethers.provider.getBlockNumber(), t.total);
     await ref.connect(alice).claim(E(5), []);
+  });
+
+  it("v2: sells and trades in your own or your referrer's market earn nothing", async () => {
+    const { alice, bob, carol, usdt, market, ref } = await setup();
+    await usdt.mint(alice.address, 0); const x = await ethers.getContractAt("TestToken", await market.bondToken());
+    await x.mint(alice.address, E(10_000)); await x.connect(alice).approve(market, ethers.MaxUint256);
+    await ref.connect(alice).registerCode("alice");
+    await ref.connect(bob).setReferrer("alice");
+    const now = (await ethers.provider.getBlock("latest")).timestamp;
+    await market.connect(alice).createMarket("Will alice's own market farm referral rewards?", "test source", now + 5 * 86400, E(0.5)); // id 1, by the referrer
+    await market.connect(bob).buy(1, true, E(10_000), 0);                 // referrer's market: nothing
+    await market.connect(bob).buy(0, true, E(10_000), 0);                 // counts: alice 20, bob 15
+    await market.connect(bob).sell(0, true, (await market.yesShares(0, bob)) / 2n, 0); // sell: nothing
+    const r = Referral.finalOwed(await events(market, ref), CONFIG);
+    expect(F(r.owed.get(alice.address.toLowerCase()))).to.be.closeTo(20, 1e-9);
+    expect(F(r.owed.get(bob.address.toLowerCase()))).to.be.closeTo(15, 1e-9);
+    expect(r.owed.get(carol.address.toLowerCase()) || 0n).to.equal(0n);
+  });
+
+  it("v2: amounts already published under v1 never go down", async () => {
+    const { alice, bob, usdt, market, ref } = await setup();
+    await ref.connect(alice).registerCode("alice");
+    await ref.connect(bob).setReferrer("alice");
+    await market.connect(bob).buy(0, true, E(10_000), 0);
+    await market.connect(bob).sell(0, true, await market.yesShares(0, bob), 0);  // v1 pays on this sell too
+    const v1 = Referral.tree(Referral.compute(await events(market, ref), CONFIG, { rules: "v1" }).owed);
+    await usdt.transfer(ref, E(1000));
+    const snap = await ethers.provider.getBlockNumber();
+    await ref.publish(v1.root, snap, v1.total);                            // an old v1 publish
+    await ref.connect(alice).claim(v1.amounts.get(alice.address.toLowerCase()), v1.proofs.get(alice.address.toLowerCase()));
+    const fin = Referral.finalOwed(await events(market, ref), CONFIG);     // v2 alone would be lower
+    const a = alice.address.toLowerCase();
+    expect(Referral.compute(await events(market, ref), CONFIG).owed.get(a)).to.be.lessThan(v1.amounts.get(a));
+    expect(fin.owed.get(a)).to.equal(v1.amounts.get(a));                   // floor keeps it
+    const t2 = Referral.tree(fin.owed);
+    await ref.publish(t2.root, await ethers.provider.getBlockNumber(), t2.total); // total didn't go down: allowed
+    await expect(ref.connect(alice).claim(t2.amounts.get(a), t2.proofs.get(a))).to.be.revertedWith("Nothing to claim");
+    const b = bob.address.toLowerCase();
+    await ref.connect(bob).claim(t2.amounts.get(b), t2.proofs.get(b));     // bob can still claim his floor
+  });
+
+  it("v2 tree recomputed later from the same events gives the same root", async () => {
+    const { alice, bob, carol, market, ref } = await setup();
+    await ref.connect(alice).registerCode("alice"); await ref.connect(bob).setReferrer("alice");
+    await ref.connect(bob).registerCode("bob"); await ref.connect(carol).setReferrer("bob");
+    await market.connect(bob).buy(0, true, E(3000), 0); await market.connect(carol).buy(0, false, E(2000), 0);
+    const snap = await ethers.provider.getBlockNumber();
+    const t1 = Referral.tree(Referral.finalOwed((await events(market, ref)).filter(e => e.block <= snap), CONFIG).owed);
+    await market.connect(carol).buy(0, false, E(500), 0);                  // later activity
+    const t2 = Referral.tree(Referral.finalOwed((await events(market, ref)).filter(e => e.block <= snap), CONFIG).owed);
+    expect(t2.root).to.equal(t1.root);
   });
 });

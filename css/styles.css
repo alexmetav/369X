@@ -265,7 +265,8 @@ ul{list-style:none;padding:0}
 }
 
 /* toast */
-.toast{position:fixed;left:50%;bottom:28px;z-index:80;transform:translate(-50%,20px);opacity:0;transition:all .3s var(--ease);padding:12px 18px;border-radius:999px;background:#0e1215;border:1px solid var(--line);font-size:14px;font-weight:600;display:flex;gap:8px;align-items:center;white-space:nowrap}
+.toast{position:fixed;left:50%;bottom:28px;z-index:80;transform:translate(-50%,20px);opacity:0;transition:all .3s var(--ease);padding:12px 18px;border-radius:999px;background:#0e1215;border:1px solid var(--line);font-size:14px;font-weight:600;display:flex;gap:8px;align-items:center;max-width:min(560px,calc(100vw - 32px));width:max-content;line-height:1.4}
+.toast .addr-dot{flex:none}
 .toast.show{opacity:1;transform:translate(-50%,0)}
 @media (max-width:860px){.toast{bottom:92px}}
 
@@ -329,7 +330,7 @@ footer{border-top:1px solid var(--line-soft);margin-top:40px}
 /* market page */
 .mk-grid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(320px,1fr);gap:16px;align-items:start;margin-top:20px}
 .mk-side{position:sticky;top:84px}
-@media (max-width:960px){.mk-grid{grid-template-columns:1fr}.mk-side{position:static}}
+@media (max-width:960px){.mk-grid{display:flex;flex-direction:column}.mk-grid>.mk-main{display:contents}.mk-main>*{order:3;width:100%;margin-top:0!important}.mk-main>:first-child{order:1}.mk-side{order:2;position:static;width:100%}}
 .crumbs{font-size:13px;color:var(--text-3)}
 .crumbs a:hover{color:var(--text)}
 .mk-title{display:flex;gap:14px;align-items:flex-start;margin-top:14px}
@@ -412,7 +413,7 @@ input[type=range]{width:100%;accent-color:var(--mint)}
 .more-list{display:grid;gap:8px;margin-top:20px}
 .more-list a{display:flex;justify-content:space-between;align-items:center;padding:16px 18px;border-radius:16px;border:1px solid var(--line);background:var(--panel)}
 .more-list small{display:block;color:var(--text-3);font-size:12px}
-@media (max-width:600px){.demo-banner span{display:none}}
+@media (max-width:600px){.demo-banner span{flex-basis:100%;order:3;line-height:1.4}}
 
 /* leverage page */
 .lev-hero{display:grid;grid-template-columns:1.1fr 1fr;gap:clamp(24px,5vw,72px);align-items:center;padding-top:clamp(12px,3vw,40px)}

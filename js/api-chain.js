@@ -75,6 +75,7 @@ const REFERRAL_ABI = [
   "function ownerOfCode(string) view returns (address)",
   "function claimed(address) view returns (uint256)",
   "function snapshotBlock() view returns (uint64)",
+  "function merkleRoot() view returns (bytes32)",
   "function totalPublished() view returns (uint256)",
   "function totalClaimed() view returns (uint256)",
   "function pool() view returns (uint256)",
@@ -83,62 +84,74 @@ const REFERRAL_ABI = [
 ];
 const HAS_VAULT = () => !!CONFIG.CONTRACTS?.vault, HAS_STAKING = () => !!CONFIG.CONTRACTS?.staking, HAS_REFERRAL = () => !!CONFIG.CONTRACTS?.referral;
 const LOCK_IDS = ["flex", "d90", "d180", "d365"];
+const MULTICALL = "0xcA11bde05977b3631167028862bE2a173976CA11";   // Multicall3: same address on almost every EVM chain
+const MC_ABI = ["function aggregate3((address target,bool allowFailure,bytes callData)[] calls) payable returns ((bool success,bytes returnData)[] returnData)"];
+const CONFIRMATIONS = CONFIG.CONFIRMATIONS || 12;                   // blocks before an event is saved for good
+const EVENTS_CACHE = "v3";
+REFERRAL_ABI.push("event RewardsPublished(bytes32 root, uint64 snapshotBlock, uint256 total)");
+
+// run async tasks a few at a time (public RPCs rate-limit bursts)
+async function pool(tasks, n = 6){
+  const out = new Array(tasks.length); let next = 0;
+  await Promise.all(Array.from({ length: Math.min(n, tasks.length) }, async () => { while(next < tasks.length){ const k = next++; out[k] = await tasks[k](); } }));
+  return out;
+}
 
 const Chain = {
-  read: null, iface: null, logs: null,
+  read: null, rpcIdx: 0, mcOk: null, data: null, scanning: null, mkCache: null, mkLoading: null,
+  clock: null, votingPeriod: null, voteRewardBps: null, cacheFull: false,
   fmt: (x) => Number(ethers.formatEther(x)),
-  clock: null,
   now: () => Chain.clock ? Chain.clock.chain + (Date.now() - Chain.clock.local) : Date.now(),
   wei: (n) => ethers.parseEther((Math.floor(Number(n) * 1e6) / 1e6).toFixed(6)),
 
+  // ---- read provider with failover across CONFIG.READ_RPCS ----
   async readProvider(){
     if(Chain.read) return Chain.read;
-    for(const url of CONFIG.READ_RPCS){
+    const urls = CONFIG.READ_RPCS;
+    for(let n = 0; n < urls.length; n++){
+      const i = (Chain.rpcIdx + n) % urls.length;
       try{
-        const p = new ethers.JsonRpcProvider(url, Number(CONFIG.CHAIN.chainId), { staticNetwork: true, batchMaxCount: 1 });
+        const p = new ethers.JsonRpcProvider(urls[i], Number(CONFIG.CHAIN.chainId), { staticNetwork: true, batchMaxCount: 1 });
         await p.getBlockNumber();
-        return (Chain.read = p);
-      }catch(e){ /* try next */ }
+        Chain.rpcIdx = i; return (Chain.read = p);
+      }catch(e){ /* try the next one */ }
     }
     throw new Error("Can't reach the BNB testnet right now. Please try again in a minute.");
+  },
+  rotate(){ Chain.read = null; Chain.mcOk = null; Chain.rpcIdx = (Chain.rpcIdx + 1) % CONFIG.READ_RPCS.length; },
+  isRevert: (e) => e?.code === "CALL_EXCEPTION" || /revert/i.test(e?.shortMessage || ""),
+  // retry a read on the next RPC if the network call fails (contract reverts are real answers: no retry)
+  async retry(fn, tries = Math.max(2, CONFIG.READ_RPCS.length)){
+    let last;
+    for(let i = 0; i < tries; i++){
+      try{ return await fn(); }catch(e){ last = e; if(Chain.isRevert(e)) throw e; Chain.rotate(); await delay(300 * (i + 1)); }
+    }
+    throw last;
+  },
+  // many reads in one request via Multicall3; falls back to a few parallel calls where it isn't deployed
+  async multi(calls){
+    if(!calls.length) return [];
+    const p = await Chain.readProvider();
+    if(Chain.mcOk === null) Chain.mcOk = (await p.getCode(MULTICALL)) !== "0x";
+    const norm = (r) => (r && r.length === 1) ? r[0] : r;
+    if(Chain.mcOk){
+      const mc = new ethers.Contract(MULTICALL, MC_ABI, p), out = [];
+      for(let i = 0; i < calls.length; i += 120){
+        const part = calls.slice(i, i + 120);
+        const res = await mc.aggregate3.staticCall(part.map(x => ({ target: x.c.target, allowFailure: true, callData: x.c.interface.encodeFunctionData(x.fn, x.args || []) })));
+        res.forEach((r, j) => { try{ out.push(r.success ? norm(part[j].c.interface.decodeFunctionResult(part[j].fn, r.returnData)) : null); }catch(e){ out.push(null); } });
+      }
+      return out;
+    }
+    return pool(calls.map(x => () => x.c[x.fn](...(x.args || [])).catch(() => null)), 6);
   },
   async market(){ return new ethers.Contract(CONFIG.CONTRACTS.market, MARKET_ABI, await Chain.readProvider()); },
   async token(addr){ return new ethers.Contract(addr, TOKEN_ABI, await Chain.readProvider()); },
   async vault(){ return new ethers.Contract(CONFIG.CONTRACTS.vault, VAULT_ABI, await Chain.readProvider()); },
   async staking(){ return new ethers.Contract(CONFIG.CONTRACTS.staking, STAKE_ABI, await Chain.readProvider()); },
-  votingPeriod: null,
   async referral(){ return new ethers.Contract(CONFIG.CONTRACTS.referral, REFERRAL_ABI, await Chain.readProvider()); },
 
-  // raw trades + invites (exact wei values) for the referral formula, cached and scanned in chunks
-  async referralEvents(){
-    if(Chain.raw && Date.now() - Chain.raw.at < 15000) return Chain.raw;
-    const p = await Chain.readProvider(), C = CONFIG.CONTRACTS;
-    const mi = new ethers.Interface(MARKET_ABI), ri = new ethers.Interface(REFERRAL_ABI);
-    const key = "chain:refraw1:" + C.market + ":" + C.referral;
-    const cache = store.get(key, null) || { from: await Chain.deployBlock(p), ev: [] };
-    const latest = await p.getBlockNumber(), STEP = 5000, ranges = [];
-    for(let b = cache.from; b <= latest; b += STEP) ranges.push([b, Math.min(latest, b + STEP - 1)]);
-    for(let i = 0; i < ranges.length; i += 4){
-      const got = await Promise.all(ranges.slice(i, i + 4).map(([f, t]) => p.getLogs({ address: [C.market, C.referral], fromBlock: f, toBlock: t })));
-      got.flat().forEach(l => {
-        const isRef = l.address.toLowerCase() === C.referral.toLowerCase();
-        let ev = null; try{ ev = (isRef ? ri : mi).parseLog(l); }catch(e){}
-        if(!ev) return;
-        if(ev.name === "Trade") cache.ev.push({ k: "t", b: l.blockNumber, i: l.index, u: ev.args.user, f: ev.args.fee.toString(), a: ev.args.amount.toString() });
-        else if(ev.name === "ReferrerSet") cache.ev.push({ k: "r", b: l.blockNumber, i: l.index, u: ev.args.user, r: ev.args.referrer });
-      });
-    }
-    cache.from = latest + 1; store.set(key, cache);
-    const [bl, b0] = await Promise.all([p.getBlock(latest), p.getBlock(Math.max(0, latest - 2000))]);
-    const spb = (bl.timestamp - b0.timestamp) / Math.max(1, latest - Math.max(0, latest - 2000));
-    const ts = (bk) => (bl.timestamp - (latest - bk) * spb) * 1000;
-    const events = cache.ev.map(e => e.k === "t"
-      ? { kind: "trade", block: e.b, logIndex: e.i, user: e.u, fee: BigInt(e.f), amount: BigInt(e.a), ts: ts(e.b) }
-      : { kind: "ref", block: e.b, logIndex: e.i, user: e.u, referrer: e.r, ts: ts(e.b) });
-    return (Chain.raw = { events, latest, at: Date.now() });
-  },
-
-  // signer from the picked wallet (MetaMask first), on the right network
+  // ---- writes go through the user's wallet ----
   async signer(){
     const eth = wallet.provider(); if(!eth) throw new Error("Connect your wallet first");
     if(BigInt(await eth.request({ method: "eth_chainId" })) !== BigInt(CONFIG.CHAIN.chainId)) await wallet.switchChain();
@@ -151,7 +164,7 @@ const Chain = {
       const tx = await c[fn](...args);
       toast("Transaction sent. Waiting for the blockchain…");
       const rc = await tx.wait();
-      Chain.logs = null;                      // refresh cached history next time
+      Chain.data = null; Chain.mkCache = null;      // fresh reads after every transaction
       return rc;
     }catch(e){ throw new Error(Chain.niceError(e)); }
   },
@@ -162,56 +175,105 @@ const Chain = {
     return m.replace(/^execution reverted:?\s*/i, "").replace(/^Faucet: /, "");
   },
   async ensureAllowance(tokenAddr, amountWei, spender = CONFIG.CONTRACTS.market){
-    const me = wallet.address, t = await Chain.token(tokenAddr);
-    if((await t.allowance(me, spender)) >= amountWei) return;
+    const t = await Chain.token(tokenAddr);
+    if((await Chain.retry(() => t.allowance(wallet.address, spender))) >= amountWei) return;
     toast("Approve the token in your wallet (one time)");
     await Chain.write(tokenAddr, TOKEN_ABI, "approve", [spender, ethers.MaxUint256]);
   },
 
-  // ---- event history (cached in the browser, scanned in chunks) ----
+  // ---- event history: one scanner for the market + referral contracts ----
   async deployBlock(p){
+    if(Number.isInteger(CONFIG.DEPLOY_BLOCK)) return CONFIG.DEPLOY_BLOCK;
     const key = "chain:deployBlock:" + CONFIG.CONTRACTS.market;
-    const saved = store.get(key, null); if(saved) return saved;
+    const saved = store.get(key, null); if(Number.isInteger(saved)) return saved;
     let lo = 0, hi = await p.getBlockNumber();
     while(lo < hi){ const mid = Math.floor((lo + hi) / 2); if((await p.getCode(CONFIG.CONTRACTS.market, mid)) === "0x") lo = mid + 1; else hi = mid; }
     store.set(key, lo); return lo;
   },
-  async history(){
-    if(Chain.logs && Date.now() - Chain.logs.at < 15000) return Chain.logs;
-    const p = await Chain.readProvider(), iface = Chain.iface || (Chain.iface = new ethers.Interface(MARKET_ABI));
-    const key = "chain:logs:" + CONFIG.CONTRACTS.market;
-    const cache = store.get(key, null) || { from: await Chain.deployBlock(p), events: [] };
-    const latest = await p.getBlockNumber();
+  async scan(){
+    if(Chain.data && Date.now() - Chain.data.at < 12000) return Chain.data;
+    if(!Chain.scanning) Chain.scanning = Chain._scan().then(d => (Chain.data = d)).finally(() => { Chain.scanning = null; });
+    return Chain.scanning;
+  },
+  async _scan(){
+    const C = CONFIG.CONTRACTS, addrs = [C.market, C.referral].filter(Boolean);
+    const key = `chain:ev:${EVENTS_CACHE}:${C.market}:${C.referral || "-"}`;
+    // drop caches from older app versions or old contracts
+    try{ Object.keys(localStorage).filter(k => k.startsWith(store.pre + "chain:") && !k.includes("deployBlock") && k !== store.pre + key).forEach(k => localStorage.removeItem(k)); }catch(e){}
+    let cache = store.get(key, null);
+    if(!cache || !Number.isInteger(cache.from) || !Array.isArray(cache.ev)) cache = { from: await Chain.retry(async () => Chain.deployBlock(await Chain.readProvider())), ev: [] };
+    const mi = new ethers.Interface(MARKET_ABI), ri = new ethers.Interface(REFERRAL_ABI);
+    const parse = (l) => {
+      const isRef = C.referral && l.address.toLowerCase() === C.referral.toLowerCase();
+      let ev = null; try{ ev = (isRef ? ri : mi).parseLog(l); }catch(e){}
+      if(!ev) return null;
+      const a = ev.args, base = { b: l.blockNumber, i: l.index };
+      switch(ev.name){
+        case "Trade": return { ...base, k: "t", id: Number(a.id), u: a.user.toLowerCase(), y: a.yes ? 1 : 0, by: a.buy ? 1 : 0, s: a.shares.toString(), a: a.amount.toString(), f: a.fee.toString(), p: a.priceYes.toString() };
+        case "MarketCreated": return { ...base, k: "c", id: Number(a.id), u: a.creator.toLowerCase(), p: a.pYes.toString() };
+        case "Resolved": return { ...base, k: "s", id: Number(a.id), y: a.outcomeYes ? 1 : 0 };
+        case "Redeemed": return { ...base, k: "d", id: Number(a.id), u: a.user.toLowerCase(), a: a.amount.toString() };
+        case "ReferrerSet": return { ...base, k: "r", u: a.user.toLowerCase(), r: a.referrer.toLowerCase() };
+        case "RewardsPublished": return { ...base, k: "p", root: a.root, snap: Number(a.snapshotBlock) };
+      }
+      return null;
+    };
+    const getLogs = (f, t) => Chain.retry(async () => (await Chain.readProvider()).getLogs({ address: addrs, fromBlock: f, toBlock: t }));
+    const latest = await Chain.retry(async () => (await Chain.readProvider()).getBlockNumber());
+    const confirmed = Math.max(cache.from - 1, latest - CONFIRMATIONS);
     const STEP = 5000, ranges = [];
-    for(let b = cache.from; b <= latest; b += STEP) ranges.push([b, Math.min(latest, b + STEP - 1)]);
+    for(let b = cache.from; b <= confirmed; b += STEP) ranges.push([b, Math.min(confirmed, b + STEP - 1)]);
     for(let i = 0; i < ranges.length; i += 4){
-      const got = await Promise.all(ranges.slice(i, i + 4).map(([f, t]) => p.getLogs({ address: CONFIG.CONTRACTS.market, fromBlock: f, toBlock: t })));
-      got.flat().forEach(l => {
-        let ev; try{ ev = iface.parseLog(l); }catch(e){ return; }
-        if(!ev) return;                     // events we don't track (ownership, reserve changes)
-        const a = ev.args, base = { n: ev.name, bk: l.blockNumber, id: Number(a.id) };
-        if(ev.name === "Trade") cache.events.push({ ...base, u: a.user.toLowerCase(), yes: a.yes, buy: a.buy, sh: Chain.fmt(a.shares), amt: Chain.fmt(a.amount), fee: Chain.fmt(a.fee), p: Chain.fmt(a.priceYes) });
-        else if(ev.name === "MarketCreated") cache.events.push({ ...base, u: a.creator.toLowerCase(), p: Chain.fmt(a.pYes) });
-        else if(ev.name === "Resolved") cache.events.push({ ...base, yes: a.outcomeYes });
-        else if(ev.name === "Redeemed") cache.events.push({ ...base, u: a.user.toLowerCase(), amt: Chain.fmt(a.amount) });
-      });
+      const batch = ranges.slice(i, i + 4);
+      (await Promise.all(batch.map(([f, t]) => getLogs(f, t)))).flat().forEach(l => { const e = parse(l); if(e) cache.ev.push(e); });
+      cache.from = batch[batch.length - 1][1] + 1;
+      if(!store.set(key, cache)) Chain.cacheFull = true;     // keeps working, just rescans more next visit
     }
-    cache.from = latest + 1;
-    store.set(key, cache);
-    // estimate timestamps from block numbers (one block lookup instead of one per event)
-    const [bl, b0] = await Promise.all([p.getBlock(latest), p.getBlock(Math.max(0, latest - 2000))]);
-    const spb = (bl.timestamp - b0.timestamp) / Math.max(1, latest - Math.max(0, latest - 2000));
-    const ts = (bk) => (bl.timestamp - (latest - bk) * spb) * 1000;
+    if(!ranges.length) store.set(key, cache);
+    // the newest few blocks are fetched fresh every time and never saved (they could still change)
+    const tail = confirmed < latest ? (await getLogs(confirmed + 1, latest)).map(parse).filter(Boolean) : [];
+    const back = Math.max(0, latest - 2000);
+    const [bl, b0] = await Chain.retry(async () => { const p = await Chain.readProvider(); return Promise.all([p.getBlock(latest), p.getBlock(back)]); });
+    const spb = (bl.timestamp - b0.timestamp) / Math.max(1, latest - back);
     Chain.clock = { chain: bl.timestamp * 1000, local: Date.now() };     // markets end by blockchain time, not this computer's clock
-    cache.events.forEach(e => e.ts = ts(e.bk));
-    return (Chain.logs = { events: cache.events, at: Date.now() });
+    const ev = cache.ev.concat(tail).sort((x, y) => x.b - y.b || x.i - y.i);
+    return { ev, confirmed, latest, ts: (bk) => (bl.timestamp - (latest - bk) * spb) * 1000, at: Date.now() };
+  },
+  // display-friendly events (numbers, timestamps)
+  async history(){
+    const d = await Chain.scan(), F = (w) => Number(ethers.formatEther(w));
+    if(d.hist) return d.hist;
+    const names = { t: "Trade", c: "MarketCreated", s: "Resolved", d: "Redeemed" };
+    const events = d.ev.filter(e => names[e.k]).map(e => {
+      const o = { n: names[e.k], bk: e.b, id: e.id, u: e.u, ts: d.ts(e.b) };
+      if(e.k === "t") Object.assign(o, { yes: !!e.y, buy: !!e.by, sh: F(e.s), amt: F(e.a), fee: F(e.f), p: F(e.p) });
+      if(e.k === "c") o.p = F(e.p);
+      if(e.k === "s") o.yes = !!e.y;
+      if(e.k === "d") o.amt = F(e.a);
+      return o;
+    });
+    return (d.hist = { events, at: d.at });
+  },
+  // exact (wei) events for the referral formula. Publishing uses confirmed blocks only (all = false), so
+  // every browser computes the same tree; live stats may include the newest blocks.
+  async referralEvents(all = false){
+    const d = await Chain.scan();
+    const events = d.ev.filter(e => all || e.b <= d.confirmed).map(e => {
+      const base = { block: e.b, logIndex: e.i, ts: d.ts(e.b) };
+      if(e.k === "t") return { ...base, kind: "trade", user: e.u, id: e.id, buy: !!e.by, fee: BigInt(e.f), amount: BigInt(e.a) };
+      if(e.k === "c") return { ...base, kind: "created", id: e.id, user: e.u };
+      if(e.k === "r") return { ...base, kind: "ref", user: e.u, referrer: e.r };
+      if(e.k === "p") return { ...base, kind: "published", root: e.root, snap: e.snap };
+      return null;
+    }).filter(Boolean);
+    return { events, latest: d.confirmed, head: d.latest };
   }
 };
 
 // category: "[Crypto] source" on new markets; keyword guess for older ones
 function chainCategory(q, source){
   const m = /^\[(\w+)\]\s*/.exec(source || "");
-  if(m && ICONS[m[1]]) return m[1];
+  if(m && Object.prototype.hasOwnProperty.call(CAT_ICONS, m[1])) return m[1];
   const t = (q + " " + source).toLowerCase();
   if(/bitcoin|btc|eth\b|ether|bnb|solana|crypto|token|coin/.test(t)) return "Crypto";
   if(/fed\b|rate|s&p|nasdaq|stock|inflation|gdp|dow\b/.test(t)) return "Finance";
@@ -221,6 +283,7 @@ function chainCategory(q, source){
   return "World";
 }
 const CAT_ICONS = { Crypto: "₿", Sports: "⚽", Politics: "🗳", Finance: "📈", Culture: "🎮", World: "🌍" };
+const CREATOR_SHARE = CONFIG.CREATOR_FEE / (CONFIG.CREATOR_FEE + CONFIG.PROTOCOL_FEE);
 
 function mapChainMarket(id, m, priceYes, ev){
   const endMs = Number(m.endTime) * 1000, cat = chainCategory(m.question, m.source);
@@ -236,7 +299,7 @@ function mapChainMarket(id, m, priceYes, ev){
     vol: Chain.fmt(m.volume), traders: new Set(trades.map(t => t.u)).size,
     status: Number(m.status) === 1 ? "resolved" : Chain.now() >= endMs ? "resolving" : "live",
     outcome: Number(m.status) === 1 ? (m.outcomeYes ? "YES" : "NO") : null,
-    votes: { YES: 0, NO: 0 }, creatorEarned: trades.reduce((s, t) => s + t.fee / 3, 0), creatorFeesUnclaimed: Chain.fmt(m.creatorFees),
+    votes: { YES: 0, NO: 0 }, creatorEarned: trades.reduce((s, t) => s + t.fee * CREATOR_SHARE, 0), creatorFeesUnclaimed: Chain.fmt(m.creatorFees),
     p: Chain.fmt(priceYes), maxLev: 1,
     history: [[created?.ts || Date.now(), created?.p ?? Chain.fmt(priceYes)], ...trades.map(t => [t.ts, t.p])],
     feed: trades.slice().reverse().map(t => ({ ts: t.ts, addr: t.u, side: t.yes ? "YES" : "NO", amount: t.amt, price: t.yes ? t.p : 1 - t.p, buy: t.buy })),
@@ -244,19 +307,119 @@ function mapChainMarket(id, m, priceYes, ev){
   };
 }
 
-async function loadChainMarkets(){
-  const mk = await Chain.market(), [count, h] = await Promise.all([mk.marketCount(), Chain.history()]);
-  const ids = [...Array(Number(count)).keys()];
-  const rows = await Promise.all(ids.map(i => mk.getMarket(i)));
-  const list = rows.map(([m, p], i) => mapChainMarket(i, m, p, h.events));
-  if(HAS_STAKING()){
-    const st = await Chain.staking();
-    if(Chain.votingPeriod === null) Chain.votingPeriod = Number(await st.votingPeriod()) * 1000;
-    const ended = list.filter(m => m.status !== "live");
-    const tallies = await Promise.all(ended.map(m => st.tallies(Number(m.id))));
-    ended.forEach((m, i) => { const t = tallies[i]; m.votes = { YES: Chain.fmt(t.yes), NO: Chain.fmt(t.no) }; m.finalized = t.finalized; m.voteEnds = m.endMs + Chain.votingPeriod; });
+async function stakingParams(st){
+  if(Chain.votingPeriod === null){
+    const [vp, rb] = await Promise.all([st.votingPeriod(), st.voteRewardBps()]);
+    Chain.votingPeriod = Number(vp) * 1000; Chain.voteRewardBps = Number(rb);
   }
-  return list;
+}
+
+// all markets, cached for 10 s and shared between callers on the same page
+async function loadChainMarkets(){
+  if(Chain.mkCache && Date.now() - Chain.mkCache.at < 10000) return Chain.mkCache.list;
+  if(!Chain.mkLoading) Chain.mkLoading = Chain.retry(async () => {
+    const mk = await Chain.market(), [count, h] = await Promise.all([mk.marketCount(), Chain.history()]);
+    const ids = [...Array(Number(count)).keys()];
+    const rows = await Chain.multi(ids.map(i => ({ c: mk, fn: "getMarket", args: [i] })));
+    if(rows.some(r => !r)) throw new Error("Couldn't read all markets");
+    const list = rows.map((r, i) => mapChainMarket(i, r[0], r[1], h.events));
+    if(HAS_STAKING()){
+      const st = await Chain.staking(); await stakingParams(st);
+      const ended = list.filter(m => m.status !== "live");
+      const tallies = await Chain.multi(ended.map(m => ({ c: st, fn: "tallies", args: [Number(m.id)] })));
+      ended.forEach((m, i) => { const t = tallies[i]; if(!t) return; m.votes = { YES: Chain.fmt(t[0]), NO: Chain.fmt(t[1]) }; m.finalized = t[2]; m.voteEnds = m.endMs + Chain.votingPeriod; });
+    }
+    Chain.mkCache = { list, at: Date.now() };
+    return list;
+  }).finally(() => { Chain.mkLoading = null; });
+  return Chain.mkLoading;
+}
+
+// the tree behind the currently published root: today's formula, or the first version's
+// for a root published before the formula changed
+function publishedTree(events, snap, root){
+  const upto = events.filter(e => e.block <= snap);
+  const t = Referral.tree(Referral.finalOwed(upto, CONFIG).owed);
+  if(!root || t.root === root) return t;
+  const t1 = Referral.tree(Referral.compute(upto, CONFIG, { rules: "v1" }).owed);
+  return t1.root === root ? t1 : t;
+}
+
+// everything about one wallet, read in as few RPC requests as possible (Multicall3)
+async function chainAccount(w){
+  const me = w.toLowerCase(), C = CONFIG.CONTRACTS, mk = await Chain.market();
+  const [usdt, tk, markets, h] = await Promise.all([Chain.token(C.usdt), Chain.token(C.token), loadChainMarkets(), Chain.history()]);
+  const ended = markets.filter(m => m.status !== "live");
+  const v = HAS_VAULT() ? await Chain.vault() : null, st = HAS_STAKING() ? await Chain.staking() : null, rf = HAS_REFERRAL() ? await Chain.referral() : null;
+  const calls = [
+    { c: usdt, fn: "balanceOf", args: [w] }, { c: tk, fn: "balanceOf", args: [w] },
+    { c: usdt, fn: "lastFaucet", args: [w] }, { c: tk, fn: "lastFaucet", args: [w] },
+    { c: mk, fn: "owner" }, { c: mk, fn: "resolver" },
+    ...markets.map(m => ({ c: mk, fn: "sharesOf", args: [Number(m.id), w] }))
+  ];
+  const extra = {};
+  const push = (name, list) => { extra[name] = calls.length; calls.push(...list); };
+  if(v) push("vault", [{ c: v, fn: "depositsOf", args: [w] }, { c: v, fn: "pointsOf", args: [w] }]);
+  if(st) push("stake", [{ c: st, fn: "staked", args: [w] }, { c: st, fn: "lockedUntil", args: [w] }, { c: st, fn: "pendingFees", args: [w] },
+    ...ended.map(m => ({ c: st, fn: "voteOf", args: [Number(m.id), w] }))]);
+  if(rf) push("ref", [{ c: rf, fn: "codeOf", args: [w] }]);
+  const r = await Chain.multi(calls);
+  if(r.slice(0, 6 + markets.length).some(x => x === null)) throw new Error("Couldn't read your account");
+  const [stable, token, lfU, lfT, owner, resolver] = r, holdings = r.slice(6, 6 + markets.length);
+  const byId = Object.fromEntries(markets.map(m => [m.id, m]));
+  const mine = h.events.filter(e => e.u === me);
+  // average cost per market+side from my trades
+  const cost = {}, history = [];
+  mine.forEach(e => {
+    if(e.n !== "Trade") return;
+    const k = e.id + ":" + (e.yes ? "YES" : "NO"), c = cost[k] || (cost[k] = { sh: 0, spent: 0 });
+    if(e.buy){ c.sh += e.sh; c.spent += e.amt; }
+    else { const part = c.sh ? c.spent * Math.min(1, e.sh / c.sh) : 0; c.sh -= e.sh; c.spent -= part;
+      const m = byId[e.id]; history.push({ marketId: String(e.id), q: m?.q, icon: m?.icon, side: e.yes ? "YES" : "NO", lev: 1, margin: part, received: e.amt, how: "Sold", closedAt: e.ts }); }
+  });
+  mine.filter(e => e.n === "Redeemed").forEach(e => { const m = byId[e.id], side = m?.outcome || "YES", c = cost[e.id + ":" + side];
+    history.push({ marketId: String(e.id), q: m?.q, icon: m?.icon, side, lev: 1, margin: c?.spent || 0, received: e.amt, how: "Won", closedAt: e.ts }); if(c) c.spent = 0; });
+  const positions = [];
+  markets.forEach((m, i) => [["YES", holdings[i][0]], ["NO", holdings[i][1]]].forEach(([side, raw]) => {
+    const shares = Chain.fmt(raw); if(shares < 1e-6) return;
+    const c = cost[m.id + ":" + side] || { spent: 0 }, margin = Math.max(0, c.spent);
+    if(m.status === "resolved" && m.outcome !== side){ history.push({ marketId: m.id, q: m.q, icon: m.icon, side, lev: 1, margin, received: 0, how: "Lost", closedAt: m.endMs }); return; }
+    const pos = { id: m.id + ":" + side, marketId: m.id, q: m.q, icon: m.icon, side, shares, margin, size: margin, borrowed: 0, lev: 1, avg: margin / shares, fee: 0 };
+    let mark;
+    if(m.status === "resolved"){ const val = m.outcome === side ? shares : 0; mark = { price: m.outcome === side ? 1 : 0, value: val, equity: val, pnl: val - margin, liq: 0 }; }
+    else mark = Engine.mark(m, pos);
+    positions.push({ ...pos, status: m.status, outcome: m.outcome, ...mark });
+  }));
+  const trades = mine.filter(e => e.n === "Trade"), volume = trades.reduce((s, e) => s + e.amt, 0);
+  const created = markets.filter(m => m.creator.toLowerCase() === me).map(m => ({ ...m, bond: { amount: CONFIG.CREATE_BOND, returned: m.status === "resolved" } }));
+  // the faucet is ready again once either token can be claimed
+  const faucetAt = Math.min(Number(lfU), Number(lfT)) * 1000;
+  const u = {
+    address: w, stable: Chain.fmt(stable), token: Chain.fmt(token), staked: 0, faucetAt, faucetEach: { stable: Number(lfU) * 1000, token: Number(lfT) * 1000 },
+    volume, trades: trades.length, maxLev: 1, pnl: history.reduce((s, x) => s + x.received - x.margin, 0),
+    positions, history: history.sort((a, b) => b.closedAt - a.closedAt), deposits: [], votes: {}, created,
+    bonds: Object.fromEntries(created.map(m => [m.id, m.bond])), feeRate: CONFIG.CREATOR_FEE + CONFIG.PROTOCOL_FEE,
+    isAdmin: [owner, resolver].some(a => a.toLowerCase() === me)
+  };
+  let vaultPts = 0;
+  if(v){
+    const i = extra.vault, dep = r[i], pts = r[i + 1];
+    if(dep){ const [list, pending] = dep;
+      u.deposits = list.map((d, k) => ({ id: String(k), amount: Chain.fmt(d.amount), lock: LOCK_IDS[Number(d.lock)], mult: [1, 2, 4, 8][Number(d.lock)],
+        start: Number(d.start) * 1000, unlock: Number(d.unlock) * 1000, earned: Chain.fmt(pending[k]), closed: d.closed })).filter(d => !d.closed); }
+    vaultPts = pts ? Chain.fmt(pts) : 0;
+  }
+  if(st){
+    const i = extra.stake;
+    u.staked = Chain.fmt(r[i] || 0n); u.lockedUntil = Number(r[i + 1] || 0n) * 1000; u.stakeFees = Chain.fmt(r[i + 2] || 0n);
+    ended.forEach((m, k) => { const vo = r[i + 3 + k]; if(vo?.voted) u.votes[m.id] = { side: vo.yes ? "YES" : "NO", weight: Chain.fmt(vo.weight), claimed: vo.claimed }; });
+  }
+  const hasCode = rf ? !!r[extra.ref] : false;
+  u.points = { parts: { Trading: Math.round(volume), Vault: Math.round(vaultPts) } };
+  u.badges = Engine.badges(u, hasCode); u.stakeTier = Engine.stakeTier(0);
+  u.points.parts.Badges = u.badges.filter(b => b.got).length * 500;
+  u.points.total = Object.values(u.points.parts).reduce((a, b) => a + b, 0);
+  return u;
 }
 
 if(CHAIN_ON){
@@ -271,31 +434,44 @@ if(CHAIN_ON){
     },
     async getMarket(id){
       const i = Number(id);
-      const mk = await Chain.market();
-      if(!(i >= 0 && i < Number(await mk.marketCount()))) throw new Error("Market not found");
-      const [[m, p], h] = await Promise.all([mk.getMarket(i), Chain.history()]);
-      const out = mapChainMarket(i, m, p, h.events);
-      if(HAS_STAKING() && out.status !== "live"){
-        const st = await Chain.staking();
-        if(Chain.votingPeriod === null) Chain.votingPeriod = Number(await st.votingPeriod()) * 1000;
-        const t = await st.tallies(i);
-        out.votes = { YES: Chain.fmt(t.yes), NO: Chain.fmt(t.no) }; out.finalized = t.finalized; out.voteEnds = out.endMs + Chain.votingPeriod;
-      }
-      return out;
+      if(!Number.isInteger(i) || i < 0) throw new Error("Market not found");
+      return Chain.retry(async () => {
+        const mk = await Chain.market();
+        if(i >= Number(await mk.marketCount())) throw new Error("Market not found");
+        const [[m, p], h] = await Promise.all([mk.getMarket(i), Chain.history()]);
+        const out = mapChainMarket(i, m, p, h.events);
+        if(HAS_STAKING() && out.status !== "live"){
+          const st = await Chain.staking(); await stakingParams(st);
+          const t = await st.tallies(i);
+          out.votes = { YES: Chain.fmt(t.yes), NO: Chain.fmt(t.no) }; out.finalized = t.finalized; out.voteEnds = out.endMs + Chain.votingPeriod;
+        }
+        return out;
+      });
     },
-    async placeTrade({ marketId, side, margin }){
+    async placeTrade({ marketId, side, margin, minShares }){
       const amt = Chain.wei(margin), yes = side === "YES", mk = await Chain.market();
-      if((await (await Chain.token(CONFIG.CONTRACTS.usdt)).balanceOf(wallet.address)) < amt) throw new Error("Not enough test USDT. Use Get test funds.");
+      if((await Chain.retry(async () => (await Chain.token(CONFIG.CONTRACTS.usdt)).balanceOf(wallet.address))) < amt) throw new Error("Not enough test USDT. Use Get test funds.");
       await Chain.ensureAllowance(CONFIG.CONTRACTS.usdt, amt);
-      const [shares] = await mk.quoteBuy(Number(marketId), yes, amt);
-      await Chain.write(CONFIG.CONTRACTS.market, MARKET_ABI, "buy", [Number(marketId), yes, amt, shares * 97n / 100n]);
+      // slippage guard: the price the user saw (minus 3%), or 97% of a fresh quote
+      const min = minShares > 0 ? Chain.wei(minShares) : ((await Chain.retry(() => mk.quoteBuy(Number(marketId), yes, amt)))[0] * 97n / 100n);
+      await Chain.write(CONFIG.CONTRACTS.market, MARKET_ABI, "buy", [Number(marketId), yes, amt, min]);
       return { ok: true };
+    },
+    // what selling a whole position would pay right now (shown before the user confirms)
+    async quoteSell({ id }){
+      const [mid, side] = id.split(":"), yes = side === "YES", mk = await Chain.market();
+      return Chain.retry(async () => {
+        const [sy, sn] = await mk.sharesOf(Number(mid), wallet.address), shares = yes ? sy : sn;
+        if(shares === 0n) return { shares: 0, out: 0, fee: 0 };
+        const [out, fee] = await mk.quoteSell(Number(mid), yes, shares);
+        return { shares: Chain.fmt(shares), out: Chain.fmt(out), fee: Chain.fmt(fee) };
+      });
     },
     async closePosition({ id }){
       const [mid, side] = id.split(":"), yes = side === "YES", mk = await Chain.market();
-      const [sy, sn] = await mk.sharesOf(Number(mid), wallet.address), shares = yes ? sy : sn;
+      const [sy, sn] = await Chain.retry(() => mk.sharesOf(Number(mid), wallet.address)), shares = yes ? sy : sn;
       if(shares === 0n) throw new Error("No shares to sell");
-      const [out] = await mk.quoteSell(Number(mid), yes, shares);
+      const [out] = await Chain.retry(() => mk.quoteSell(Number(mid), yes, shares));
       await Chain.write(CONFIG.CONTRACTS.market, MARKET_ABI, "sell", [Number(mid), yes, shares, out * 97n / 100n]);
       return { ok: true, received: Chain.fmt(out) };
     },
@@ -306,72 +482,18 @@ if(CHAIN_ON){
     async claimCreatorFees({ id }){ await Chain.write(CONFIG.CONTRACTS.market, MARKET_ABI, "claimCreatorFees", [Number(id)]); return { ok: true }; },
     async getAccount(w){
       if(!w) return null;
-      const me = w.toLowerCase(), mk = await Chain.market();
-      const [usdt, tok] = [await Chain.token(CONFIG.CONTRACTS.usdt), await Chain.token(CONFIG.CONTRACTS.token)];
-      const [stable, token, lastF, markets, owner, resolver] = await Promise.all([
-        usdt.balanceOf(w), tok.balanceOf(w), usdt.lastFaucet(w), loadChainMarkets(), mk.owner(), mk.resolver()]);
-      const h = await Chain.history(), mine = h.events.filter(e => e.u === me);
-      const holdings = await Promise.all(markets.map(m => mk.sharesOf(Number(m.id), w)));
-      // average cost per market+side from my trades
-      const cost = {}, history = [];
-      mine.forEach(e => {
-        if(e.n !== "Trade") return;
-        const k = e.id + ":" + (e.yes ? "YES" : "NO"), c = cost[k] || (cost[k] = { sh: 0, spent: 0 });
-        if(e.buy){ c.sh += e.sh; c.spent += e.amt; }
-        else { const part = c.sh ? c.spent * Math.min(1, e.sh / c.sh) : 0; c.sh -= e.sh; c.spent -= part;
-          const m = markets[e.id]; history.push({ marketId: String(e.id), q: m?.q, icon: m?.icon, side: e.yes ? "YES" : "NO", lev: 1, margin: part, received: e.amt, how: "Sold", closedAt: e.ts }); }
-      });
-      mine.filter(e => e.n === "Redeemed").forEach(e => { const m = markets[e.id], side = m?.outcome || "YES", c = cost[e.id + ":" + side];
-        history.push({ marketId: String(e.id), q: m?.q, icon: m?.icon, side, lev: 1, margin: c?.spent || 0, received: e.amt, how: "Won", closedAt: e.ts }); if(c) c.spent = 0; });
-      const positions = [];
-      markets.forEach((m, i) => [["YES", holdings[i][0]], ["NO", holdings[i][1]]].forEach(([side, raw]) => {
-        const shares = Chain.fmt(raw); if(shares < 1e-6) return;
-        const c = cost[m.id + ":" + side] || { spent: 0 }, margin = Math.max(0, c.spent);
-        if(m.status === "resolved" && m.outcome !== side){ history.push({ marketId: m.id, q: m.q, icon: m.icon, side, lev: 1, margin, received: 0, how: "Lost", closedAt: m.endMs }); return; }
-        const pos = { id: m.id + ":" + side, marketId: m.id, q: m.q, icon: m.icon, side, shares, margin, size: margin, borrowed: 0, lev: 1, avg: margin / shares, fee: 0 };
-        let mark;
-        if(m.status === "resolved"){ const v = m.outcome === side ? shares : 0; mark = { price: m.outcome === side ? 1 : 0, value: v, equity: v, pnl: v - margin, liq: 0 }; }
-        else mark = Engine.mark(m, pos);
-        positions.push({ ...pos, status: m.status, outcome: m.outcome, ...mark });
-      }));
-      const trades = mine.filter(e => e.n === "Trade"), volume = trades.reduce((s, e) => s + e.amt, 0);
-      const created = markets.filter(m => m.creator.toLowerCase() === me).map(m => ({ ...m, bond: { amount: CONFIG.CREATE_BOND, returned: m.status === "resolved" } }));
-      const u = {
-        address: w, stable: Chain.fmt(stable), token: Chain.fmt(token), staked: 0, faucetAt: Number(lastF) * 1000,
-        volume, trades: trades.length, maxLev: 1, pnl: history.reduce((s, x) => s + x.received - x.margin, 0),
-        positions, history: history.sort((a, b) => b.closedAt - a.closedAt), deposits: [], votes: {}, created,
-        bonds: Object.fromEntries(created.map(m => [m.id, m.bond])), feeRate: CONFIG.CREATOR_FEE + CONFIG.PROTOCOL_FEE,
-        isAdmin: [owner, resolver].some(a => a.toLowerCase() === me)
-      };
-      let vaultPts = 0;
-      if(HAS_VAULT()){
-        const v = await Chain.vault(), [[list, pending], pts] = await Promise.all([v.depositsOf(w), v.pointsOf(w)]);
-        u.deposits = list.map((d, i) => ({ id: String(i), amount: Chain.fmt(d.amount), lock: LOCK_IDS[Number(d.lock)], mult: [1, 2, 4, 8][Number(d.lock)],
-          start: Number(d.start) * 1000, unlock: Number(d.unlock) * 1000, earned: Chain.fmt(pending[i]), closed: d.closed })).filter(d => !d.closed);
-        vaultPts = Chain.fmt(pts);
-      }
-      if(HAS_STAKING()){
-        const st = await Chain.staking();
-        const [s, lock, fees] = await Promise.all([st.staked(w), st.lockedUntil(w), st.pendingFees(w)]);
-        u.staked = Chain.fmt(s); u.lockedUntil = Number(lock) * 1000; u.stakeFees = Chain.fmt(fees);
-        const ended = markets.filter(m => m.status !== "live");
-        const vs = await Promise.all(ended.map(m => st.voteOf(Number(m.id), w)));
-        ended.forEach((m, i) => { if(vs[i].voted) u.votes[m.id] = { side: vs[i].yes ? "YES" : "NO", weight: Chain.fmt(vs[i].weight), claimed: vs[i].claimed }; });
-      }
-      u.points = { parts: { Trading: Math.round(volume), Vault: Math.round(vaultPts) } };
-      u.badges = Engine.badges(u, false); u.stakeTier = Engine.stakeTier(0);
-      u.points.parts.Badges = u.badges.filter(b => b.got).length * 500;
-      u.points.total = Object.values(u.points.parts).reduce((a, b) => a + b, 0);
-      return u;
+      return Chain.retry(() => chainAccount(w));
     },
     async faucet(w){
       const [usdt, tok] = [await Chain.token(CONFIG.CONTRACTS.usdt), await Chain.token(CONFIG.CONTRACTS.token)];
-      const now = Date.now() / 1000, ready = async (t) => now >= Number(await t.lastFaucet(w)) + 86400;
+      await Chain.scan().catch(() => {});                 // sets the blockchain clock
+      const now = Chain.now() / 1000, ready = async (t) => now >= Number(await Chain.retry(() => t.lastFaucet(w))) + 86400;
       const [a, b] = await Promise.all([ready(usdt), ready(tok)]);
       if(!a && !b) throw new Error("Faucet used. Come back in 24 hours.");
-      if(a) await Chain.write(CONFIG.CONTRACTS.usdt, TOKEN_ABI, "faucet", []);
-      if(b) await Chain.write(CONFIG.CONTRACTS.token, TOKEN_ABI, "faucet", []);
-      return { ok: true };
+      const got = { stable: 0, token: 0 };
+      if(a){ await Chain.write(CONFIG.CONTRACTS.usdt, TOKEN_ABI, "faucet", []); got.stable = CONFIG.FAUCET_STABLE; }
+      if(b){ await Chain.write(CONFIG.CONTRACTS.token, TOKEN_ABI, "faucet", []); got.token = CONFIG.FAUCET_TOKEN; }
+      return { ok: true, ...got };
     },
     async createMarket({ q, cat, ends, source, p }){
       const mk = await Chain.market(), bond = await mk.bondAmount();
@@ -380,7 +502,7 @@ if(CHAIN_ON){
       const end = Math.floor(Date.parse(ends + "T23:59:59Z") / 1000);
       const rc = await Chain.write(CONFIG.CONTRACTS.market, MARKET_ABI, "createMarket", [q, `[${cat}] ${source}`, end, Chain.wei(p)]);
       const ev = rc.logs.map(l => { try{ return mk.interface.parseLog(l); }catch(e){ return null; } }).find(e => e?.name === "MarketCreated");
-      return { ok: true, id: ev ? String(ev.args.id) : "0" };
+      return { ok: true, id: ev ? String(ev.args.id) : null };      // null: couldn't read the id, show the market list
     },
     // with an outcome: admin settles directly on the market. Without: stakers' vote result is written (anyone can do this).
     async finalize({ id, outcome }){
@@ -429,12 +551,12 @@ if(CHAIN_ON){
     async unstake({ amount }){ await Chain.write(CONFIG.CONTRACTS.staking, STAKE_ABI, "unstake", [Chain.wei(amount)]); return { ok: true }; },
     async getAffiliate(w){
       const me = w.toLowerCase(), rf = await Chain.referral();
-      const [code, referrer, claimedW, snap, published, pool] = await Promise.all([rf.codeOf(w), rf.referrerOf(w), rf.claimed(w), rf.snapshotBlock(), rf.totalPublished(), rf.pool()]);
-      const { events, latest } = await Chain.referralEvents();
-      const live = Referral.compute(events, CONFIG);
+      const [code, referrer, claimedW, snap, published, pool, root] = await Chain.retry(() => Promise.all([rf.codeOf(w), rf.referrerOf(w), rf.claimed(w), rf.snapshotBlock(), rf.totalPublished(), rf.pool(), rf.merkleRoot()]));
+      const { events, latest } = await Chain.referralEvents(true);
+      const live = Referral.finalOwed(events, CONFIG);
       // what's claimable now = my amount in the published tree minus what I already claimed
       let publishedMine = 0n;
-      if(Number(snap) > 0){ const pub = Referral.compute(events.filter(e => e.block <= Number(snap)), CONFIG); publishedMine = pub.owed.get(me) || 0n; }
+      if(Number(snap) > 0){ const t = publishedTree(events, Number(snap), root); publishedMine = t.amounts.get(me) || 0n; }
       const rows = [...(live.referrals.get(me) || new Map()).entries()].map(([u, r]) => ({ addr: short(u), joined: new Date(r.ts || Date.now()).toISOString().slice(0, 10), volume: Chain.fmt(r.volume), earned: Chain.fmt(r.earned), tier: 1 }));
       const d = live.daily.get(me) || new Map();
       const earnings = [...Array(14).keys()].map(i => { const day = new Date(Chain.now() - (13 - i) * 864e5).toISOString().slice(0, 10); return Chain.fmt(d.get(day) || 0n); });
@@ -465,18 +587,20 @@ if(CHAIN_ON){
     async claimAffiliate(w){
       const rf = await Chain.referral(), snap = Number(await rf.snapshotBlock());
       if(!snap) throw new Error("No rewards have been published yet");
-      const { events } = await Chain.referralEvents();
-      const t = Referral.tree(Referral.compute(events.filter(e => e.block <= snap), CONFIG).owed), me = w.toLowerCase();
+      const { events } = await Chain.referralEvents(true);
+      const root = await rf.merkleRoot(), t = publishedTree(events, snap, root), me = w.toLowerCase();
+      if(t.root !== root) throw new Error("Rewards are still syncing. Please try again in a minute.");
       const amt = t.amounts.get(me); if(!amt) throw new Error("Nothing to claim yet");
       const before = await rf.claimed(w);
       await Chain.write(CONFIG.CONTRACTS.referral, REFERRAL_ABI, "claim", [amt, t.proofs.get(me)]);
       return { ok: true, amount: Chain.fmt(amt - before) };
     },
-    // admin: publish everyone's rewards up to the latest block; tops up the pool first if needed
+    // admin: publish everyone's rewards up to the last confirmed block; tops up the pool first if needed
     async publishReferralRewards(){
-      Chain.raw = null;                                   // always publish from fresh data
+      Chain.data = null;                                  // always publish from fresh data
       const rf = await Chain.referral(), { events, latest } = await Chain.referralEvents(), snap = latest;
-      const t = Referral.tree(Referral.compute(events.filter(e => e.block <= snap), CONFIG).owed);
+      if(snap <= Number(await rf.snapshotBlock())) throw new Error("Nothing new to publish yet. Try again in a minute.");
+      const t = Referral.tree(Referral.finalOwed(events.filter(e => e.block <= snap), CONFIG).owed);
       const [pool, claimedAll] = await Promise.all([rf.pool(), rf.totalClaimed()]);
       if(pool + claimedAll < t.total){
         const need = t.total - pool - claimedAll + ethers.parseEther("1000");
@@ -495,7 +619,13 @@ if(CHAIN_ON){
     async getLeaderboard(by = "profit"){
       const h = await Chain.history(), users = {}, cost = {}, outcome = {};
       h.events.forEach(e => {
-        if(e.n === "Resolved"){ outcome[e.id] = e.yes; return; }
+        if(e.n === "Resolved"){
+          outcome[e.id] = e.yes;
+          // everything still held on the losing side is a loss
+          const lose = ":" + e.id + ":" + (e.yes ? "N" : "Y");
+          Object.keys(cost).filter(k => k.endsWith(lose)).forEach(k => { const c = cost[k]; if(c.spent > 1e-9 && c.sh > 1e-9){ const u = users[k.split(":")[0]]; u.pnl -= c.spent; u.closed++; } c.spent = 0; c.sh = 0; });
+          return;
+        }
         if(e.n !== "Trade" && e.n !== "Redeemed") return;
         const u = users[e.u] || (users[e.u] = { addr: e.u, pnl: 0, volume: 0, trades: 0, wins: 0, closed: 0 });
         const yes = e.n === "Redeemed" ? outcome[e.id] : e.yes;          // a payout is always on the winning side

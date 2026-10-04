@@ -4,13 +4,19 @@
    runs this exact code on public blockchain data, so anyone can check
    that the published rewards are correct. All math is integer (wei).
 
-   For every trade by a user who accepted an invite (only trades after
-   they accepted count):
+   Rules "v2" (current). For every BUY by a user who accepted an invite
+   (only trades after they accepted count; sells earn nothing; trades in a
+   market created by the trader, their referrer or their referrer's
+   referrer earn nothing, so wash trading can't farm the pool):
      protocol part = fee x PROTOCOL / (PROTOCOL + CREATOR)        (1% of the 1.5%)
      referrer      += protocol part x tier rate (20/25/30/35%, by the
                       referrer's total referred volume before this trade)
      referrer's referrer += protocol part x 5%
      trader        += fee x 10% (the invited user's fee rebate)
+
+   Rules "v1" (the first version) also paid on sells and on own markets.
+   Amounts already published under v1 are kept as a floor, so nobody's
+   published total ever goes down (see finalOwed).
    ===================================================================== */
 (function(root){
   const E = (typeof ethers !== "undefined") ? ethers : require("ethers");
@@ -25,12 +31,18 @@
     };
   }
 
-  // events: [{ kind: "ref", block, logIndex, user, referrer } | { kind: "trade", block, logIndex, user, fee, amount, ts? }]
-  function compute(events, c = cfg){
+  // events: { kind: "ref", block, logIndex, user, referrer }
+  //       | { kind: "trade", block, logIndex, user, id, buy, fee, amount, ts? }
+  //       | { kind: "created", block, logIndex, id, user }          (market creator)
+  //       | { kind: "published", block, logIndex, root, snap }      (RewardsPublished)
+  function compute(events, c = cfg, opts = {}){
+    const v2 = (opts.rules || "v2") === "v2", creators = new Map();
     const P = params(c), owed = new Map(), add = (a, v) => { if(v > 0n) owed.set(a, (owed.get(a) || 0n) + v); };
     const ref = new Map(), refVolume = new Map(), referrals = new Map(), daily = new Map(), l2 = new Map(), rebates = new Map();
     const sorted = [...events].sort((a, b) => a.block - b.block || a.logIndex - b.logIndex);
     for(const e of sorted){
+      if(e.kind === "created"){ creators.set(Number(e.id), e.user.toLowerCase()); continue; }
+      if(e.kind !== "ref" && e.kind !== "trade") continue;
       const u = e.user.toLowerCase();
       if(e.kind === "ref"){
         const r = e.referrer.toLowerCase(); ref.set(u, r);
@@ -39,6 +51,11 @@
         continue;
       }
       const r = ref.get(u); if(!r) continue;
+      if(v2){
+        if(e.buy === false) continue;                                     // sells earn nothing
+        const cr = creators.get(Number(e.id));
+        if(cr && (cr === u || cr === r || cr === ref.get(r))) continue;   // own / referrer's market
+      }
       const fee = BigInt(e.fee), amount = BigInt(e.amount);
       const protocolPart = fee * P.protocolBps / (P.protocolBps + P.creatorBps);
       const vol = refVolume.get(r) || 0n;
@@ -77,6 +94,21 @@
     return { root: layers[layers.length - 1][0], total: entries.reduce((s, [, v]) => s + v, 0n), proofs, amounts };
   }
 
-  const api = { params, compute, tree, leaf };
+  // What everyone is owed: v2 rules, but never less than what a v1 publish already granted.
+  // The v1 floor comes from the last published root that matches the v1 formula exactly,
+  // so every browser derives the same numbers from the same blockchain data.
+  function finalOwed(events, c = cfg){
+    const pubs = events.filter(e => e.kind === "published").sort((a, b) => a.block - b.block || a.logIndex - b.logIndex);
+    let floor = new Map();
+    for(const p of pubs){
+      const t1 = tree(compute(events.filter(e => e.block <= Number(p.snap)), c, { rules: "v1" }).owed);
+      if(t1.root === p.root) floor = t1.amounts;
+    }
+    const res = compute(events, c, { rules: "v2" });
+    for(const [a, v] of floor) if(v > (res.owed.get(a) || 0n)) res.owed.set(a, v);
+    return res;
+  }
+
+  const api = { params, compute, finalOwed, tree, leaf };
   if(typeof module !== "undefined" && module.exports) module.exports = api; else root.Referral = api;
 })(typeof window !== "undefined" ? window : globalThis);

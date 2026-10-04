@@ -41,6 +41,7 @@ const CONFIG = {
     referral: "0x8588EbF2471A6cf622416E251A3c29832523bDF7"  // Referral369X
   },
   // public read-only RPC endpoints (tried in order)
+  // if you change these, also allow the new hosts in vercel.json (Content-Security-Policy connect-src)
   READ_RPCS: ["https://bsc-testnet-rpc.publicnode.com", "https://data-seed-prebsc-1-s1.bnbchain.org:8545", "https://data-seed-prebsc-2-s1.bnbchain.org:8545"],
 
   // ---- network (BNB Smart Chain Testnet by default) ------------------

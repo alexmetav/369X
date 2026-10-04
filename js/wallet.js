@@ -2,8 +2,9 @@
    WALLET
    Uses a real browser wallet (MetaMask, Trust Wallet, Coinbase Wallet,
    Rabby, Binance Wallet...) when one is installed and switches it to the
-   chain in CONFIG.CHAIN. With no wallet installed it falls back to a
-   demo address so people can still try the app.
+   chain in CONFIG.CHAIN. With no wallet installed, demo mode falls back
+   to a demo address; on-chain and live modes ask for a real wallet
+   (on phones: a link that opens this site inside the MetaMask app).
    ===================================================================== */
 const wallet = {
   get address(){ return store.get("wallet", null)?.address || null; },
@@ -17,8 +18,11 @@ const wallet = {
   async connect(){
     if(!this.picked){ await Wallets.discover(); this.picked = Wallets.pick(); }
     const eth = this.provider();
-    if(!eth && backend.live){
-      toast("Install MetaMask or open this site in your wallet app's browser", true);
+    const realOnly = backend.live || (typeof CHAIN_ON !== "undefined" && CHAIN_ON);
+    if(!eth && realOnly){
+      if(/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)){
+        if(confirm("No wallet found in this browser.\n\nOpen this site inside the MetaMask app?")) location.href = "https://metamask.app.link/dapp/" + location.host + location.pathname + location.hash;
+      }else toast("No wallet found. Install MetaMask (metamask.io), then refresh this page.", true);
       return;
     }
     if(!eth){
@@ -57,7 +61,7 @@ const wallet = {
 
   // restore a previous session silently and follow account / network changes
   async init(){
-    if(backend.live && this.kind === "demo") store.set("wallet", null);   // demo wallets can't sign in to the live backend
+    if((backend.live || (typeof CHAIN_ON !== "undefined" && CHAIN_ON)) && this.kind === "demo") store.set("wallet", null);   // demo wallets can't sign transactions
     await Wallets.discover(); this.picked = Wallets.pick();
     const eth = this.provider(); if(!eth) return;
     try{

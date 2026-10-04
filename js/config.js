@@ -36,13 +36,13 @@ const CONFIG = {
     usdt:   "0x3011487baF4c7c0D4745317de7A2F1305BD2FFA0",   // test USDT (faucet)
     token:  "0x822a5E3Ee4901694124F2aB35C695EA6c9219721",   // test $369X (faucet)
     market: "0x3C8a6DFF6Be5fDE0fDEE59cBC9e6E69650d84A09",   // Market369X
-    vault:   "0x01681060c0179e60322D69F274F3cDbE83330971",  // Vault369X
-    staking: "0x79c163F2c33fdf0Db5e56723fe86961247048432",  // Stake369X
+    vault:   "0xb1F5010cBa164fe1c9C871801854Ffe6d9eF3c79",  // Vault369X v2
+    staking: "0xC123B837a583c79bcb1441a0B94383A7f203a7d0",  // Stake369X v2
     referral: "0x8588EbF2471A6cf622416E251A3c29832523bDF7"  // Referral369X
   },
   // public read-only RPC endpoints (tried in order)
   // vault + staking from before an upgrade: the website lets people withdraw from them
-  CONTRACTS_OLD: { vault: "", staking: "" },
+  CONTRACTS_OLD: { vault: "0x01681060c0179e60322D69F274F3cDbE83330971", staking: "0x79c163F2c33fdf0Db5e56723fe86961247048432" },
   // if you change these, also allow the new hosts in vercel.json (Content-Security-Policy connect-src)
   READ_RPCS: ["https://bsc-testnet-rpc.publicnode.com", "https://data-seed-prebsc-1-s1.bnbchain.org:8545", "https://data-seed-prebsc-2-s1.bnbchain.org:8545"],
 

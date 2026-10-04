@@ -305,7 +305,7 @@ function chainCategory(q, source){
   if(/gta|movie|film|album|music|game|oscar|netflix/.test(t)) return "Culture";
   return "World";
 }
-const CAT_ICONS = { Crypto: "₿", Sports: "⚽", Politics: "🗳", Finance: "📈", Culture: "🎮", World: "🌍" };
+const CAT_ICONS = { Crypto: "Crypto", Sports: "Sports", Politics: "Politics", Finance: "Finance", Culture: "Culture", World: "World" };   // drawn by catIcon()
 const CREATOR_SHARE = CONFIG.CREATOR_FEE / (CONFIG.CREATOR_FEE + CONFIG.PROTOCOL_FEE);
 
 function mapChainMarket(id, m, priceYes, ev){
@@ -440,6 +440,7 @@ async function chainAccount(w){
     ended.forEach((m, k) => { const vo = r[i + 3 + k]; if(vo?.voted) u.votes[m.id] = { side: vo.yes ? "YES" : "NO", weight: Chain.fmt(vo.weight), claimed: vo.claimed }; });
   }
   const hasCode = rf ? !!r[extra.ref] : false;
+  u.refCode = rf && r[extra.ref] ? String(r[extra.ref]) : null;
   u.points = { parts: { Trading: Math.round(volume), Vault: Math.round(vaultPts) } };
   u.badges = Engine.badges(u, hasCode); u.stakeTier = Engine.stakeTier(0);
   u.points.parts.Badges = u.badges.filter(b => b.got).length * 500;

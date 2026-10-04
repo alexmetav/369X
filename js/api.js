@@ -32,24 +32,24 @@ const post = (path, body) => http(path, { method: "POST", body: JSON.stringify(b
    DEMO ENGINE
    --------------------------------------------------------------------- */
 const CATS = ["All", "Crypto", "Sports", "Politics", "Finance", "Culture", "World"];
-const ICONS = { Crypto: "₿", Sports: "⚽", Politics: "🗳", Finance: "📈", Culture: "🎬", World: "🌍" };
+const ICONS = { Crypto: "Crypto", Sports: "Sports", Politics: "Politics", Finance: "Finance", Culture: "Culture", World: "World" };   // drawn by catIcon()
 
 function seedMarkets(){
   const raw = [
-    ["btc-150k", "Will Bitcoin trade above $150K before Dec 31, 2026?", "Crypto", "₿", .41, 842300, 6120, "2026-12-31", "CoinGecko BTC/USD price"],
-    ["fed-nov", "Will the Fed cut rates at the November 2026 meeting?", "Finance", "🏛", .62, 1204500, 9844, "2026-11-04", "federalreserve.gov FOMC statement"],
-    ["eth-6k", "Will ETH close Q4 2026 above $6,000?", "Crypto", "Ξ", .33, 512900, 4210, "2026-12-31", "CoinGecko ETH/USD daily close"],
-    ["ucl-rm", "Will Real Madrid reach the Champions League quarter-finals?", "Sports", "⚽", .71, 398400, 3380, "2027-04-15", "uefa.com official results"],
-    ["house-26", "Will Democrats win the US House in the 2026 midterms?", "Politics", "🗳", .58, 2310700, 15402, "2026-11-03", "AP race calls"],
-    ["bnb-ath", "Will BNB set a new all-time high before November?", "Crypto", "◆", .47, 286100, 2915, "2026-10-31", "CoinGecko BNB/USD price"],
-    ["spx-7500", "Will the S&P 500 close 2026 above 7,500?", "Finance", "📈", .55, 674800, 5230, "2026-12-31", "S&P Dow Jones Indices close"],
-    ["lakers-po", "Will the Lakers make the 2027 NBA playoffs?", "Sports", "🏀", .64, 221600, 1994, "2027-04-12", "nba.com standings"],
-    ["gta6", "Will GTA VI launch on its announced release date?", "Culture", "🎮", .72, 455200, 4876, "2026-11-19", "Rockstar Games official announcement"],
-    ["ind-aus", "Will India win their next Test series against Australia?", "Sports", "🏏", .52, 318000, 3702, "2027-01-20", "ESPNcricinfo series result"],
-    ["hot-2026", "Will 2026 be the hottest year on record globally?", "World", "🌍", .44, 143900, 1288, "2027-01-15", "NASA GISS annual report"],
-    ["starship", "Will Starship complete a full booster and ship reuse in 2026?", "World", "🚀", .29, 201300, 2140, "2026-12-31", "SpaceX official statement"],
-    ["btc-sep", "Did Bitcoin close September above $110K?", "Crypto", "₿", .66, 389000, 3011, addDays(-2), "CoinGecko BTC/USD monthly close"],
-    ["sol-etf", "Was a spot SOL ETF approved in the US by Sept 20?", "Crypto", "◎", .81, 512000, 4402, addDays(-12), "SEC.gov filings"]
+    ["btc-150k", "Will Bitcoin trade above $150K before Dec 31, 2026?", "Crypto", "Crypto", .41, 842300, 6120, "2026-12-31", "CoinGecko BTC/USD price"],
+    ["fed-nov", "Will the Fed cut rates at the November 2026 meeting?", "Finance", "Finance", .62, 1204500, 9844, "2026-11-04", "federalreserve.gov FOMC statement"],
+    ["eth-6k", "Will ETH close Q4 2026 above $6,000?", "Crypto", "Crypto", .33, 512900, 4210, "2026-12-31", "CoinGecko ETH/USD daily close"],
+    ["ucl-rm", "Will Real Madrid reach the Champions League quarter-finals?", "Sports", "Sports", .71, 398400, 3380, "2027-04-15", "uefa.com official results"],
+    ["house-26", "Will Democrats win the US House in the 2026 midterms?", "Politics", "Politics", .58, 2310700, 15402, "2026-11-03", "AP race calls"],
+    ["bnb-ath", "Will BNB set a new all-time high before November?", "Crypto", "Crypto", .47, 286100, 2915, "2026-10-31", "CoinGecko BNB/USD price"],
+    ["spx-7500", "Will the S&P 500 close 2026 above 7,500?", "Finance", "Finance", .55, 674800, 5230, "2026-12-31", "S&P Dow Jones Indices close"],
+    ["lakers-po", "Will the Lakers make the 2027 NBA playoffs?", "Sports", "Sports", .64, 221600, 1994, "2027-04-12", "nba.com standings"],
+    ["gta6", "Will GTA VI launch on its announced release date?", "Culture", "Culture", .72, 455200, 4876, "2026-11-19", "Rockstar Games official announcement"],
+    ["ind-aus", "Will India win their next Test series against Australia?", "Sports", "Sports", .52, 318000, 3702, "2027-01-20", "ESPNcricinfo series result"],
+    ["hot-2026", "Will 2026 be the hottest year on record globally?", "World", "World", .44, 143900, 1288, "2027-01-15", "NASA GISS annual report"],
+    ["starship", "Will Starship complete a full booster and ship reuse in 2026?", "World", "World", .29, 201300, 2140, "2026-12-31", "SpaceX official statement"],
+    ["btc-sep", "Did Bitcoin close September above $110K?", "Crypto", "Crypto", .66, 389000, 3011, addDays(-2), "CoinGecko BTC/USD monthly close"],
+    ["sol-etf", "Was a spot SOL ETF approved in the US by Sept 20?", "Crypto", "Crypto", .81, 512000, 4402, addDays(-12), "SEC.gov filings"]
   ];
   return raw.map(([id, q, cat, icon, p, vol, traders, ends, source]) => {
     const b = Math.round(Math.min(20000, Math.max(2500, vol / 120)));
@@ -199,17 +199,17 @@ const Engine = {
   badges(u, hasCode = !!store.get("affCode:" + (wallet.address || "").toLowerCase(), null)){
     const created = Object.keys(u.bonds || {}).length;
     return [
-      { ico: "🎯", name: "First call", desc: "Place your first trade", got: u.trades >= 1 },
-      { ico: "🔥", name: "On a roll", desc: "Place 10 trades", got: u.trades >= 10 },
+      { ico: "target", name: "First call", desc: "Place your first trade", got: u.trades >= 1 },
+      { ico: "flame", name: "On a roll", desc: "Place 10 trades", got: u.trades >= 10 },
       ...(CONFIG.LEVERAGE_ENABLED ? [
-      { ico: "🚀", name: "Leverage up", desc: "Open a 5× position", got: u.maxLev >= 5 },
-      { ico: "⚡", name: "Max power", desc: "Open a 10× position", got: u.maxLev >= 10 }] : []),
-      { ico: "🐋", name: "Whale", desc: "Trade $10K volume", got: u.volume >= 10000 },
-      { ico: "🏗", name: "Market maker", desc: "Create a market", got: created >= 1 },
-      { ico: "🏦", name: "Liquidity provider", desc: "Deposit into the vault", got: u.deposits.length >= 1 },
-      { ico: "💎", name: "Diamond hands", desc: "Lock in the vault for 365 days", got: u.deposits.some(d => d.lock === "d365") },
-      { ico: "🛡", name: "Guardian", desc: "Stake and vote on a resolution", got: Object.keys(u.votes || {}).length >= 1 },
-      { ico: "🤝", name: "Connector", desc: "Create your referral link", got: hasCode }
+      { ico: "rocket", name: "Leverage up", desc: "Open a 5× position", got: u.maxLev >= 5 },
+      { ico: "bolt", name: "Max power", desc: "Open a 10× position", got: u.maxLev >= 10 }] : []),
+      { ico: "waves", name: "Whale", desc: "Trade $10K volume", got: u.volume >= 10000 },
+      { ico: "blocks", name: "Market maker", desc: "Create a market", got: created >= 1 },
+      { ico: "vault", name: "Liquidity provider", desc: "Deposit into the vault", got: u.deposits.length >= 1 },
+      { ico: "diamond", name: "Diamond hands", desc: "Lock in the vault for 365 days", got: u.deposits.some(d => d.lock === "d365") },
+      { ico: "shield", name: "Guardian", desc: "Stake and vote on a resolution", got: Object.keys(u.votes || {}).length >= 1 },
+      { ico: "link", name: "Connector", desc: "Create your referral link", got: hasCode }
     ];
   }
 };
@@ -322,7 +322,7 @@ const api = {
     if(ms.some(m => m.q.toLowerCase() === q.toLowerCase())) throw new Error("A market with this question already exists");
     const id = q.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) + "-" + Math.random().toString(36).slice(2, 6);
     const b = liquidity || CONFIG.DEFAULT_LIQUIDITY;
-    const m = { id, q, cat, icon: ICONS[cat] || "❓", ends, source, rules, vol: 0, traders: 0, creator: w, createdAt: Date.now(),
+    const m = { id, q, cat, icon: ICONS[cat] || "World", ends, source, rules, vol: 0, traders: 0, creator: w, createdAt: Date.now(),
       ...LMSR.init(p, b), status: "live", outcome: null, votes: { YES: 0, NO: 0 }, creatorEarned: 0, history: [[Date.now(), p]], feed: [] };
     ms.unshift(m); Engine.saveMarkets(ms);
     u.token -= CONFIG.CREATE_BOND; u.bonds[id] = { amount: CONFIG.CREATE_BOND, returned: false }; u.points.bonus += 1000;

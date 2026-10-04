@@ -68,6 +68,7 @@ function renderNav(){
         <div class="sep"></div>
         <button data-act="faucet">💧 Get test funds</button>
         <a href="#/portfolio">📊 Portfolio</a>
+        ${CHAIN_ON && ACC?.isAdmin ? `<a href="#/admin">🛡 Safety panel</a>` : ""}
         <button data-act="copyAddr">📋 Copy address</button>
         ${CHAIN_ON ? `<a href="${CONFIG.CHAIN.blockExplorerUrls[0]}/address/${esc(a)}" target="_blank" rel="noopener">🔎 View on BscScan</a>` : ""}
         <button data-act="disconnect">⏏ Disconnect</button>
@@ -721,6 +722,57 @@ async function pageLegal(){
   </div></section>`;
 }
 
+/* ---------- owner safety panel ---------- */
+const SAFE = { bond: 5000, minStake: 100000 };
+async function pageAdmin(){
+  if(!(CHAIN_ON && CONFIG.CONTRACTS.staking)) return chainSoon("Safety panel", "The safety panel works with the on-chain contracts.");
+  if(!wallet.address) return connectPrompt("Connect the owner wallet to open the safety panel.");
+  if(!ACC?.isAdmin) return connectPrompt("Only the owner wallet can open the safety panel.");
+  const s = await api.getSafety(), others = Math.max(0, s.totalStaked - s.ownerStake);
+  const stakeTarget = Math.max(SAFE.minStake, Math.ceil(others * 2 / 1000) * 1000), stakeNeed = Math.max(0, stakeTarget - s.ownerStake);
+  const canFund = Math.floor(s.reserve / Math.max(1, s.perMarketMax));
+  const chip = (ok, okText, badText, level = "warn") => `<span class="tag ${ok ? "ok" : level}">${ok ? "✓ " + okText : "! " + badText}</span>`;
+  const row = (title, body, act = "") => `<div class="safety-row"><div><h3>${title}</h3><p>${body}</p></div><div class="act">${act}</div></div>`;
+  const checks = [
+    row(`Voting reward ${chip(s.voteRewardBps === 0, "Off", (s.voteRewardBps / 100) + "% of stake", "bad")}`,
+      s.voteRewardBps === 0 ? "Nobody can farm free tokens by voting on markets they made themselves."
+        : `Right now anyone can create a market, vote on it alone and collect ${s.voteRewardBps / 100}% of their stake as a reward, again and again. Turn it off until the new contracts (Step C) add a minimum turnout.`,
+      s.voteRewardBps === 0 ? "" : `<button class="btn btn-grad btn-sm" data-act="safeReward">Turn off</button>`),
+    row(`Your voting power ${chip(s.ownerStake >= stakeTarget, "Strong", s.ownerStake ? "Too small" : "No stake", "bad")}`,
+      `You've staked <b class="num">${num(s.ownerStake)}</b> ${T()}; everyone else together: <b class="num">${num(others)}</b>. There's no minimum turnout yet, so one stranger voting alone could decide a market. With at least twice everyone else's stake, your vote always wins.` +
+      (stakeNeed > s.ownerTokens ? ` <span style="color:#ffd88a">Your wallet has only ${num(s.ownerTokens)} ${T()}.</span>` : "") +
+      (s.ownerLockedUntil > nowMs() ? ` Your stake is locked until ${fmtDate(new Date(s.ownerLockedUntil).toISOString())} because you voted.` : ""),
+      stakeNeed > 0 && s.ownerTokens >= 1 ? `<button class="btn btn-grad btn-sm" data-act="safeStake" data-v="${Math.min(stakeNeed, Math.floor(s.ownerTokens))}">Stake ${compactN(Math.min(stakeNeed, Math.floor(s.ownerTokens)))}</button>` : ""),
+    row(`Market bond ${chip(s.bond >= SAFE.bond, num(s.bond) + " " + T(), num(s.bond) + " " + T())}`,
+      `Every new market locks up to <b class="num">${money(s.perMarketMax)}</b> of the reserve. A ${num(SAFE.bond)} ${T()} bond means one market per faucet claim, so spam is slow. Honest creators get it back.`,
+      s.bond >= SAFE.bond ? "" : `<button class="btn btn-grad btn-sm" data-act="safeBond">Set to ${num(SAFE.bond)}</button>`),
+    row(`Protocol reserve ${chip(canFund >= 20, money(s.reserve), money(s.reserve), canFund < 5 ? "bad" : "warn")}`,
+      `Enough for about <b class="num">${num(canFund)}</b> more markets in the worst case. Markets can't be created when it runs out.`,
+      `<input class="input num" id="resAmt" type="number" min="1" value="100000" style="width:120px;height:36px" aria-label="Amount"><button class="btn btn-ghost btn-sm" data-act="safeFund">Add USDT</button>`)
+  ];
+  const queue = s.resolving.length ? s.resolving.map(m => {
+    const lead = m.votes.YES === m.votes.NO ? "tie" : m.votes.YES > m.votes.NO ? "YES leads" : "NO leads";
+    const voteBtns = m.open && !m.ownerVote && s.ownerStake > 0 ? `<button class="btn btn-ghost btn-sm" data-act="vote" data-id="${esc(m.id)}" data-side="YES">Vote YES</button><button class="btn btn-ghost btn-sm" data-act="vote" data-id="${esc(m.id)}" data-side="NO">Vote NO</button>` : "";
+    const fin = !m.open && (m.votes.YES + m.votes.NO) > 0 ? `<button class="btn btn-grad btn-sm" data-act="finalize" data-id="${esc(m.id)}">Finalize vote</button>` : "";
+    return row(`<a href="${mHref(m.id)}">${esc(m.icon)} ${esc(m.q)}</a> ${m.ownerVote ? `<span class="tag ok">You voted ${esc(m.ownerVote)}</span>` : m.open ? `<span class="tag warn">You haven't voted</span>` : ""}`,
+      `YES <b class="num">${compactN(m.votes.YES)}</b> · NO <b class="num">${compactN(m.votes.NO)}</b> (${lead}). ${m.open ? "Voting closes " + new Date(m.voteEnds).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : (m.votes.YES + m.votes.NO) ? "Voting closed: finalize to pay winners." : "Voting closed with no votes: set the result yourself."}`,
+      `${voteBtns}${fin}<button class="btn btn-ghost btn-sm" data-act="finalize" data-id="${esc(m.id)}" data-outcome="YES">Set YES</button><button class="btn btn-ghost btn-sm" data-act="finalize" data-id="${esc(m.id)}" data-outcome="NO">Set NO</button>`);
+  }).join("") : `<p class="muted" style="padding:12px 0">No markets waiting for a result. 👍</p>`;
+  const todo = checks.filter(c => c.includes('class="tag warn"') || c.includes('class="tag bad"')).length;
+  return `<section class="page-head"><div class="wrap">
+    ${head("Safety panel", "Owner only. Fix each warning with one click (your wallet asks you to confirm), then open this page once a day.", `<span class="tag ${todo ? "warn" : "ok"}">${todo ? todo + " to fix" : "All safe"}</span>`)}
+    <div class="panel pad"><h2 class="h3">Settings</h2>${checks.join("")}</div>
+    <div class="panel pad" style="margin-top:16px"><h2 class="h3">Markets waiting for a result (${s.resolving.length})</h2>${queue}</div>
+    <div class="panel pad" style="margin-top:16px"><h2 class="h3">Fixed in the next contract upgrade (Step C)</h2>
+      <div class="feed" style="margin-top:8px">
+        <div><span>Minimum voter turnout, and reward only for markets you didn't create</span><b class="muted">Step C</b></div>
+        <div><span>Fee collection can be triggered by anyone and get stuck in the vault</span><b class="muted">Step C</b></div>
+        <div><span>Markets nobody votes on, and slashed bonds</span><b class="muted">Step C</b></div>
+        <div><span>Owner is one wallet (move to a multisig before mainnet)</span><b class="muted">Step E</b></div>
+      </div><p class="side-note">Unharvested protocol fees: ${money(s.unharvested, 2)} · voting period ${num(s.votingPeriodH)} h · reward pool ${tok(s.rewardPool)}</p></div>
+  </div></section>`;
+}
+
 /* ---------- leverage (coming soon) ---------- */
 const simState = { p: 0.5, side: "YES", lev: 5, amt: 200 };
 // liquidation price for a fresh position, ignoring price impact (good enough for a simulator)
@@ -808,7 +860,7 @@ function setDial(v){
    ROUTER
    ===================================================================== */
 const PAGES = { home: pageHome, markets: pageMarkets, leverage: pageLeverage, market: pageMarket, create: pageCreate, portfolio: pagePortfolio, vault: pageVault, stake: pageStake,
-  resolve: pageResolve, rewards: pageRewards, leaderboard: pageLeaderboard, affiliate: pageAffiliate, token: pageToken, docs: pageDocs, legal: pageLegal, more: pageMore };
+  resolve: pageResolve, rewards: pageRewards, leaderboard: pageLeaderboard, affiliate: pageAffiliate, token: pageToken, docs: pageDocs, legal: pageLegal, admin: pageAdmin, more: pageMore };
 const MORE = ["create", "stake", "resolve", "affiliate", "token", "docs"];
 
 let routeSeq = 0;
@@ -961,6 +1013,13 @@ const ACTIONS = {
   },
   async acceptInvite(el){
     await busy(el, "Accepting…", async () => { await api.acceptInvite(refBy().toLowerCase()); toast("Invite accepted. You now get fees back on every trade."); inviteBanner(); route(true); });
+  },
+  async safeReward(el){ await busy(el, "…", async () => { await api.setVoteReward(0); toast("Voting reward turned off"); route(true); }); },
+  async safeBond(el){ await busy(el, "…", async () => { await api.setBond(SAFE.bond); toast("Bond set to " + num(SAFE.bond) + " " + T()); route(true); }); },
+  async safeStake(el){ await busy(el, "…", async () => { await api.stake({ amount: +el.dataset.v }); toast("Staked " + num(+el.dataset.v) + " " + T()); await refreshAccount(); route(true); }); },
+  async safeFund(el){
+    const amount = +$("#resAmt").value || 0; if(amount < 1) return toast("Enter an amount", true);
+    await busy(el, "…", async () => { await api.fundReserve(amount); toast("Added " + money(amount) + " to the reserve"); route(true); });
   },
   async publishRewards(el){
     await busy(el, "Publishing…", async () => { const r = await api.publishReferralRewards(); toast(`Published ${money(r.total, 2)} for ${r.people} people`); route(true); });

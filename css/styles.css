@@ -430,3 +430,11 @@ input[type=range]{width:100%;accent-color:var(--mint)}
 .liq-track i{position:absolute;left:0;top:0;bottom:0;border-radius:99px;background:rgba(255,122,136,.35)}
 .liq-track s{position:absolute;top:-4px;width:2px;height:14px;background:var(--no);border-radius:2px}
 .liq-track u{position:absolute;top:-4px;width:2px;height:14px;background:var(--lime);border-radius:2px}
+.tag.warn{background:rgba(255,200,110,.12);color:#ffd88a}
+.tag.bad{background:rgba(255,122,136,.14);color:var(--no)}
+.safety-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;align-items:center;padding:16px 0;border-top:1px solid var(--line-soft)}
+.safety-row:first-of-type{border-top:0}
+.safety-row h3{font-size:15px;font-weight:600;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.safety-row p{font-size:13px;color:var(--text-2);margin-top:4px}
+.safety-row .act{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+@media (max-width:600px){.safety-row{grid-template-columns:1fr}.safety-row .act{justify-content:flex-start}}

@@ -68,7 +68,7 @@ const CONFIG = {
   LEVERAGE_MAX: 2000,               // largest leveraged position, in USDT
 
   // ---- market creation -----------------------------------------------
-  CREATE_BOND: 1000,                // $369X bond, returned when the market resolves cleanly
+  CREATE_BOND: 5000,                // $369X bond, returned when the market resolves cleanly (keep equal to the on-chain bondAmount)
   DEFAULT_LIQUIDITY: 5000,          // LMSR "b" for new markets (bigger = prices move less)
 
   // ---- faucet (demo / testnet only) ----------------------------------

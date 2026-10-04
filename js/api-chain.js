@@ -29,6 +29,11 @@ const MARKET_ABI = [
   "function resolver() view returns (address)",
   "function bondAmount() view returns (uint256)",
   "function reserve() view returns (uint256)",
+  "function protocolFees() view returns (uint256)",
+  "function feeRecipient() view returns (address)",
+  "function defaultB() view returns (int256)",
+  "function fundReserve(uint256)",
+  "function setBondAmount(uint256)",
   "event Trade(uint256 indexed id, address indexed user, bool yes, bool buy, uint256 shares, uint256 amount, uint256 fee, uint256 priceYes)",
   "event MarketCreated(uint256 indexed id, address indexed creator, string question, uint64 endTime, uint256 pYes, int256 b)",
   "event Resolved(uint256 indexed id, bool outcomeYes, bool bondSlashed)",
@@ -61,6 +66,7 @@ const STAKE_ABI = [
   "function pendingFees(address) view returns (uint256)",
   "function votingPeriod() view returns (uint256)",
   "function voteRewardBps() view returns (uint256)",
+  "function setVoteReward(uint256)",
   "function rewardPool() view returns (uint256)",
   "function tallies(uint256) view returns (uint256 yes, uint256 no, bool finalized, bool outcomeYes)",
   "function voteOf(uint256,address) view returns (tuple(bool voted,bool yes,bool claimed,uint256 weight))"
@@ -612,6 +618,40 @@ if(CHAIN_ON){
     },
     async fundReferralPool(amount){
       await Chain.write(CONFIG.CONTRACTS.usdt, TOKEN_ABI.concat(["function transfer(address,uint256) returns (bool)"]), "transfer", [CONFIG.CONTRACTS.referral, Chain.wei(amount)]);
+      return { ok: true };
+    },
+    // ---- owner safety panel: current settings, risks and what needs attention ----
+    async getSafety(){
+      const C = CONFIG.CONTRACTS, mk = await Chain.market(), st = await Chain.staking(), tk = await Chain.token(C.token);
+      const owner = await Chain.retry(() => mk.owner());
+      const [r, markets] = await Promise.all([Chain.multi([
+        { c: mk, fn: "reserve" }, { c: mk, fn: "bondAmount" }, { c: mk, fn: "protocolFees" }, { c: mk, fn: "defaultB" }, { c: mk, fn: "resolver" },
+        { c: st, fn: "voteRewardBps" }, { c: st, fn: "votingPeriod" }, { c: st, fn: "totalStaked" }, { c: st, fn: "staked", args: [owner] },
+        { c: st, fn: "rewardPool" }, { c: tk, fn: "balanceOf", args: [owner] }, { c: st, fn: "lockedUntil", args: [owner] }
+      ]), loadChainMarkets()]);
+      if(r.some(x => x === null)) throw new Error("Couldn't read the contract settings");
+      const [reserve, bond, fees, b, resolver, rewardBps, period, total, ownerStake, rewardPool, ownerTokens, ownerLock] = r;
+      const pending = markets.filter(m => m.status === "resolving" && !m.finalized);
+      const ownerVotes = await Chain.multi(pending.map(m => ({ c: st, fn: "voteOf", args: [Number(m.id), owner] })));
+      const now = Chain.now(), F = Chain.fmt;
+      return {
+        owner, resolverIsStaking: resolver.toLowerCase() === C.staking.toLowerCase(),
+        reserve: F(reserve), bond: F(bond), unharvested: F(fees), b: F(b),
+        // worst-case reserve one new market can lock: b * ln(1 / 0.05) at a 5% / 95% start price
+        perMarketMax: F(b) * Math.log(20),
+        voteRewardBps: Number(rewardBps), votingPeriodH: Number(period) / 3600, rewardPool: F(rewardPool),
+        totalStaked: F(total), ownerStake: F(ownerStake), ownerTokens: F(ownerTokens), ownerLockedUntil: Number(ownerLock) * 1000,
+        resolving: pending.map((m, i) => ({ id: m.id, q: m.q, icon: m.icon, votes: m.votes, voteEnds: m.voteEnds, open: now < m.voteEnds,
+          ownerVote: ownerVotes[i]?.voted ? (ownerVotes[i].yes ? "YES" : "NO") : null }))
+      };
+    },
+    async setVoteReward(bps){ await Chain.write(CONFIG.CONTRACTS.staking, STAKE_ABI, "setVoteReward", [bps]); Chain.voteRewardBps = null; Chain.votingPeriod = null; return { ok: true }; },
+    async setBond(amount){ await Chain.write(CONFIG.CONTRACTS.market, MARKET_ABI, "setBondAmount", [Chain.wei(amount)]); return { ok: true }; },
+    async fundReserve(amount){
+      const amt = Chain.wei(amount);
+      if((await Chain.retry(async () => (await Chain.token(CONFIG.CONTRACTS.usdt)).balanceOf(wallet.address))) < amt) throw new Error("Not enough test USDT in your wallet");
+      await Chain.ensureAllowance(CONFIG.CONTRACTS.usdt, amt);
+      await Chain.write(CONFIG.CONTRACTS.market, MARKET_ABI, "fundReserve", [amt]);
       return { ok: true };
     },
     async trackClick(){},

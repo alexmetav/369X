@@ -38,7 +38,7 @@ const CONFIG = {
     market: "0x3C8a6DFF6Be5fDE0fDEE59cBC9e6E69650d84A09",   // Market369X
     vault:   "0x01681060c0179e60322D69F274F3cDbE83330971",  // Vault369X
     staking: "0x79c163F2c33fdf0Db5e56723fe86961247048432",  // Stake369X
-    referral: ""   // Referral369X: filled in after the deploy page's referral step
+    referral: "0x8588EbF2471A6cf622416E251A3c29832523bDF7"  // Referral369X
   },
   // public read-only RPC endpoints (tried in order)
   READ_RPCS: ["https://bsc-testnet-rpc.publicnode.com", "https://data-seed-prebsc-1-s1.bnbchain.org:8545", "https://data-seed-prebsc-2-s1.bnbchain.org:8545"],

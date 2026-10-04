@@ -66,7 +66,7 @@ async function pageAnalytics(){
   if(!ACC?.isAdmin) return connectPrompt("Only the owner wallet can open analytics.");
   AN.data = await api.getAnalytics();
   return `<section class="page-head"><div class="wrap">
-    ${head("Analytics", "How 369X is being used, straight from the blockchain. Times are UTC.", `<a class="btn btn-ghost" href="#/admin">🛡 Safety panel</a>`)}
+    ${head("Analytics", "How 369X is being used, straight from the blockchain. Times are UTC.", `<a class="btn btn-ghost" href="#/admin">${ic("shield")}Safety panel</a>`)}
     <div class="an-filters" role="group" aria-label="Date range">${[["7", "7 days"], ["30", "30 days"], ["90", "90 days"], ["all", "All time"]].map(([v, l]) =>
       `<button class="chip ${AN.range === v ? "on" : ""}" data-act="anRange" data-v="${v}" aria-pressed="${AN.range === v}">${l}</button>`).join("")}</div>
     <div id="anBody"></div>
@@ -119,7 +119,7 @@ function renderAnalytics(){
     <div class="an-two">
       <div class="panel"><div class="pad" style="padding-bottom:0"><h2 class="h3">Top markets</h2></div><div class="scroll-x"><table class="table">
         <thead><tr><th>Market</th><th class="r">Volume</th><th class="r">Trades</th><th class="r">Traders</th></tr></thead>
-        <tbody>${c.topMarkets.length ? c.topMarkets.map(x => `<tr><td style="white-space:normal;min-width:200px"><a href="${mHref(x.m.id)}">${esc(x.m.icon)} ${esc(x.m.q)}</a></td><td class="r num">${money(x.vol, 0)}</td><td class="r num">${num(x.trades)}</td><td class="r num">${num(x.users)}</td></tr>`).join("")
+        <tbody>${c.topMarkets.length ? c.topMarkets.map(x => `<tr><td style="white-space:normal;min-width:200px"><a href="${mHref(x.m.id)}">${catIcon(x.m.icon)} ${esc(x.m.q)}</a></td><td class="r num">${money(x.vol, 0)}</td><td class="r num">${num(x.trades)}</td><td class="r num">${num(x.users)}</td></tr>`).join("")
           : `<tr><td colspan="4" class="empty">No trades in this period.</td></tr>`}</tbody></table></div></div>
       <div class="panel"><div class="pad" style="padding-bottom:0"><h2 class="h3">Top traders</h2></div><div class="scroll-x"><table class="table">
         <thead><tr><th>Wallet</th><th class="r">Volume</th><th class="r">Trades</th><th class="r">Buys</th></tr></thead>

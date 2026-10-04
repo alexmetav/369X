@@ -478,3 +478,15 @@ input[type=range]{width:100%;accent-color:var(--mint)}
 .an-tip i{width:12px;height:2px;border-radius:2px;display:inline-block}
 .an-tip b{color:var(--text);font-size:13px}
 .an-two>*{min-width:0}
+
+/* 369X line icons (js/icons.js) */
+.ic{width:1.15em;height:1.15em;flex:none;stroke:currentColor;vertical-align:-.2em}
+.ic.g{stroke:url(#ig369)}
+.menu .ic{width:18px;height:18px}
+.micon .ic{width:22px;height:22px}
+.mk-title .micon .ic{width:28px;height:28px}
+.badge .ico .ic{width:28px;height:28px}
+.badge:not(.got) .ico .ic.g{stroke:currentColor}
+.feed span:has(> .ic){display:inline-flex;align-items:center;gap:10px}
+td > a .ic,td .ic{margin-right:4px}
+.btn .ic{width:16px;height:16px}

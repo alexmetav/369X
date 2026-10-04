@@ -28,7 +28,7 @@ function marketCard(m){
     ? `<div class="yn"><a class="yes" href="${mHref(id, "?side=YES")}"><span>Yes</span><span class="num">${cents(p)}</span></a><a class="no" href="${mHref(id, "?side=NO")}"><span>No</span><span class="num">${cents(1 - p)}</span></a></div>`
     : `<div style="margin-top:16px">${statusTag(m)}</div>`;
   return `<article class="mcard">
-    <div class="mhead"><div class="micon" aria-hidden="true">${esc(m.icon)}</div><div><a class="mq stretch" href="${mHref(id)}">${esc(m.q)}</a><div class="mcat">${esc(m.cat)} · ${m.status === "live" ? "Ends" : "Ended"} ${fmtDate(m.ends)}${m.status === "live" && m.maxLev > 1 ? `<span class="lev-badge">${m.maxLev}×</span>` : ""}</div></div></div>
+    <div class="mhead"><div class="micon" aria-hidden="true">${catIcon(m.icon || m.cat)}</div><div><a class="mq stretch" href="${mHref(id)}">${esc(m.q)}</a><div class="mcat">${esc(m.cat)} · ${m.status === "live" ? "Ends" : "Ended"} ${fmtDate(m.ends)}${m.status === "live" && m.maxLev > 1 ? `<span class="lev-badge">${m.maxLev}×</span>` : ""}</div></div></div>
     <div class="mprob"><b class="num">${pct(p)}</b><span>chance of YES</span></div>
     <div class="bar"><i style="width:${(p * 100).toFixed(1)}%"></i></div>
     ${action}
@@ -66,12 +66,12 @@ function renderNav(){
         <div class="bal-row"><span>Network</span><b>${wallet.kind === "demo" ? "Demo wallet" : esc(CONFIG.CHAIN.chainName)}</b></div>
         ${wallet.kind === "injected" ? `<div class="bal-row"><span>Wallet app</span><b>${esc(wallet.name)}</b></div>` : ""}
         <div class="sep"></div>
-        <button data-act="faucet">💧 Get test funds</button>
-        <a href="#/portfolio">📊 Portfolio</a>
-        ${CHAIN_ON && ACC?.isAdmin ? `<a href="#/admin">🛡 Safety panel</a><a href="#/analytics">📈 Analytics</a>` : ""}
-        <button data-act="copyAddr">📋 Copy address</button>
-        ${CHAIN_ON ? `<a href="${CONFIG.CHAIN.blockExplorerUrls[0]}/address/${esc(a)}" target="_blank" rel="noopener">🔎 View on BscScan</a>` : ""}
-        <button data-act="disconnect">⏏ Disconnect</button>
+        <button data-act="faucet">${ic("drop", "g")}Get test funds</button>
+        <a href="#/portfolio">${ic("portfolio", "g")}Portfolio</a>
+        ${CHAIN_ON && ACC?.isAdmin ? `<a href="#/admin">${ic("shield", "g")}Safety panel</a><a href="#/analytics">${ic("analytics", "g")}Analytics</a>` : ""}
+        <button data-act="copyAddr">${ic("copy", "g")}Copy address</button>
+        ${CHAIN_ON ? `<a href="${CONFIG.CHAIN.blockExplorerUrls[0]}/address/${esc(a)}" target="_blank" rel="noopener">${ic("external", "g")}View on BscScan</a>` : ""}
+        <button data-act="disconnect">${ic("logout", "g")}Disconnect</button>
       </div></details>`;
 }
 let accSeq = 0;
@@ -236,7 +236,7 @@ async function pageMarket(id, query){
     <div class="mk-grid">
       <div class="mk-main">
         <div class="panel pad">
-          <div class="mk-title"><div class="micon">${esc(m.icon)}</div><div><h1>${esc(m.q)}</h1>
+          <div class="mk-title"><div class="micon" aria-hidden="true">${catIcon(m.icon || m.cat)}</div><div><h1>${esc(m.q)}</h1>
             <div class="mk-meta">${statusTag(m)}<span>${esc(m.cat)}</span>·<span>${m.status === "live" ? "Ends" : "Ended"} ${fmtDate(m.ends)}</span>${m.maxLev > 1 ? `<span class="lev-badge">Up to ${m.maxLev}×</span>` : ""}</div></div></div>
           <div class="mprob"><b class="num" id="mkPrice">${pct(m.p)}</b><span class="num ${ch >= 0 ? "pos" : "neg"}" id="mkChange">${ch >= 0 ? "▲" : "▼"} ${(Math.abs(ch) * 100).toFixed(1)} pts today</span></div>
           <div class="chart" id="mkChart">${lineChart(m.history)}</div>
@@ -370,7 +370,7 @@ async function refreshMarket(){
 function positionsTable(list, compactView){
   return `<table class="table"><thead><tr>${compactView ? "" : "<th>Market</th>"}<th>Side</th><th class="r">Size</th><th class="r">Avg → now</th><th class="r">Liq. price</th><th class="r">Value</th><th class="r">P&amp;L</th><th></th></tr></thead><tbody>
     ${list.map(p => `<tr>
-      ${compactView ? "" : `<td style="min-width:220px;white-space:normal"><a href="${mHref(p.marketId)}">${esc(p.icon)} ${esc(p.q)}</a></td>`}
+      ${compactView ? "" : `<td style="min-width:220px;white-space:normal"><a href="${mHref(p.marketId)}">${catIcon(p.icon)} ${esc(p.q)}</a></td>`}
       <td><span class="tag ${p.side === "YES" ? "ok" : ""}" style="${p.side === "NO" ? "color:var(--no);background:rgba(255,122,136,.12)" : ""}">${esc(p.side)}</span>${p.lev > 1 ? `<span class="lev-badge">${p.lev}×</span>` : ""}</td>
       <td class="r num">${money(p.size, 2)}</td>
       <td class="r num">${cents(p.avg)} → ${cents(p.price)}</td>
@@ -424,7 +424,7 @@ async function pagePortfolio(){
   const open = a.positions.reduce((s, p) => s + Math.max(0, p.equity), 0), unreal = a.positions.reduce((s, p) => s + p.pnl, 0);
   const canFaucet = nowMs() > a.faucetAt + CONFIG.FAUCET_COOLDOWN_H * 36e5;
   return `<section class="page-head"><div class="wrap">
-    ${head("Portfolio", "", `<button class="btn ${canFaucet ? "btn-grad" : "btn-ghost"}" data-act="faucet">💧 ${canFaucet ? "Get test funds" : "Faucet used today"}</button>`)}
+    ${head("Portfolio", "", `<button class="btn ${canFaucet ? "btn-grad" : "btn-ghost"}" data-act="faucet">${ic("drop")}${canFaucet ? "Get test funds" : "Faucet used today"}</button>`)}
     <div class="stat-grid">
       <div class="panel stat"><small>Available ${S()}</small><b class="num">${money(a.stable, 2)}</b></div>
       <div class="panel stat"><small>Open positions value</small><b class="num">${money(open, 2)}</b></div>
@@ -438,7 +438,7 @@ async function pagePortfolio(){
       <tbody>${a.created.map(m => `<tr><td style="white-space:normal;min-width:220px"><a href="${mHref(m.id)}">${esc(m.q)}</a></td><td>${statusTag(m)}</td><td class="r num">${money(m.vol)}</td><td class="r num pos">+${money(m.creatorEarned, 2)}${m.creatorFeesUnclaimed > 0.0001 ? ` <button class="btn btn-ghost btn-sm" data-act="claimFees" data-id="${esc(m.id)}">Claim</button>` : ""}</td><td class="r num">${m.bond.returned ? "Returned" : tok(m.bond.amount)}</td></tr>`).join("")}</tbody></table></div></div>` : ""}
     <div class="panel" style="margin-top:16px"><div class="pad" style="padding-bottom:0"><h2 class="h3">History</h2></div>
       ${a.history.length ? `<div class="scroll-x"><table class="table"><thead><tr><th>Market</th><th>Side</th><th class="r">Staked</th><th class="r">Received</th><th class="r">Result</th><th class="r">When</th></tr></thead><tbody>
-      ${a.history.slice(0, 50).map(h => `<tr><td style="white-space:normal;min-width:220px">${esc(h.icon)} ${esc(h.q)}</td><td>${esc(h.side)}${h.lev > 1 ? `<span class="lev-badge">${h.lev}×</span>` : ""}</td><td class="r num">${money(h.margin, 2)}</td><td class="r num">${money(h.received, 2)}</td><td class="r num ${h.received >= h.margin ? "pos" : "neg"}">${esc(h.how)} ${signed(h.received - h.margin)}</td><td class="r muted">${ago(h.closedAt)}</td></tr>`).join("")}
+      ${a.history.slice(0, 50).map(h => `<tr><td style="white-space:normal;min-width:220px">${catIcon(h.icon)} ${esc(h.q)}</td><td>${esc(h.side)}${h.lev > 1 ? `<span class="lev-badge">${h.lev}×</span>` : ""}</td><td class="r num">${money(h.margin, 2)}</td><td class="r num">${money(h.received, 2)}</td><td class="r num ${h.received >= h.margin ? "pos" : "neg"}">${esc(h.how)} ${signed(h.received - h.margin)}</td><td class="r muted">${ago(h.closedAt)}</td></tr>`).join("")}
       </tbody></table></div>` : `<div class="empty">Closed and settled trades show up here.</div>`}</div>
   </div></section>`;
 }
@@ -528,11 +528,11 @@ async function pageStakeChain(){
         ${a.token < 1 && a.staked < 1 ? `<div class="info">No ${T()} yet? <button style="color:var(--lime);font-weight:600" data-act="faucet">Get test tokens</button></div>` : ""}`}
       </div>
       <div class="panel pad"><h2 class="h3">What staking does</h2><div class="feed" style="margin-top:8px">
-        <div><span>💸 Share of protocol fees</span><b>${pct(1 - CONFIG.LP_SHARE)}, in ${S()}</b></div>
-        <div><span>🛡 Vote on market results</span><b>1 token = 1 vote</b></div>
-        ${Chain.quorum ? `<div><span>🗳 Minimum turnout to settle by vote</span><b class="num">${compactN(Chain.quorum)} ${T()}</b></div>` : ""}
-        <div><span>🎯 Reward for correct votes</span><b>${Chain.voteRewardBps === null ? "A share of your stake" : Chain.voteRewardBps ? pct(Chain.voteRewardBps / 10000, 2).replace(/\.00%$/, "%") + " of your stake" : "Paused for now"}</b></div>
-        <div><span>🏷 Trading fee discounts</span><b class="muted">Next market upgrade</b></div>
+        <div><span>${ic("coins", "g")}Share of protocol fees</span><b>${pct(1 - CONFIG.LP_SHARE)}, in ${S()}</b></div>
+        <div><span>${ic("shield", "g")}Vote on market results</span><b>1 token = 1 vote</b></div>
+        ${Chain.quorum ? `<div><span>${ic("ballot", "g")}Minimum turnout to settle by vote</span><b class="num">${compactN(Chain.quorum)} ${T()}</b></div>` : ""}
+        <div><span>${ic("target", "g")}Reward for correct votes</span><b>${Chain.voteRewardBps === null ? "A share of your stake" : Chain.voteRewardBps ? pct(Chain.voteRewardBps / 10000, 2).replace(/\.00%$/, "%") + " of your stake" : "Paused for now"}</b></div>
+        <div><span>${ic("tag", "g")}Trading fee discounts</span><b class="muted">Next market upgrade</b></div>
       </div><p class="side-note">After you vote, your stake stays locked until that market's voting closes, so nobody can vote twice with the same tokens.</p></div>
     </div>
   </div></section>`;
@@ -576,7 +576,7 @@ async function pageResolve(){
   return `<section class="page-head"><div class="wrap">
     ${head("Resolution", `When a market ends, ${T()} stakers vote on the result using its resolution source. Vote with the final outcome to earn rewards.`, `<a class="btn btn-ghost" href="#/stake">Stake to vote</a>`)}
     <h2 class="h3" style="margin-bottom:12px">Waiting for votes (${pending.length})</h2>
-    <div class="grid">${pending.length ? pending.map(m => `<div>${resolveBox(m).replace(/<h2 class="h3">[^<]*<\/h2>/, `<a class="h3" style="display:block" href="${mHref(m.id)}">${esc(m.icon)} ${esc(m.q)}</a><div class="mcat">Ended ${fmtDate(m.ends)}</div>`)}</div>`).join("") : `<div class="panel empty" style="grid-column:1/-1">Nothing to resolve right now.</div>`}</div>
+    <div class="grid">${pending.length ? pending.map(m => `<div>${resolveBox(m).replace(/<h2 class="h3">[^<]*<\/h2>/, `<a class="h3" style="display:block" href="${mHref(m.id)}">${catIcon(m.icon)} ${esc(m.q)}</a><div class="mcat">Ended ${fmtDate(m.ends)}</div>`)}</div>`).join("") : `<div class="panel empty" style="grid-column:1/-1">Nothing to resolve right now.</div>`}</div>
     <h2 class="h3" style="margin:32px 0 12px">Recently resolved</h2>
     <div class="grid">${done.slice(0, 6).map(marketCard).join("") || `<div class="panel empty" style="grid-column:1/-1">None yet.</div>`}</div>
   </div></section>`;
@@ -603,7 +603,7 @@ async function pageRewards(){
       </div></div>
     </div>
     <div class="panel pad" style="margin-top:16px"><h2 class="h3">Badges (${a.badges.filter(b => b.got).length}/${a.badges.length})</h2>
-      <div class="badges">${a.badges.map(b => `<div class="badge ${b.got ? "got" : ""}"><div class="ico">${b.ico}</div><b>${esc(b.name)}</b><small>${esc(b.desc)}</small></div>`).join("")}</div></div>
+      <div class="badges">${a.badges.map(b => `<div class="badge ${b.got ? "got" : ""}"><div class="ico">${ic(b.ico, "g")}</div><b>${esc(b.name)}</b><small>${esc(b.desc)}</small></div>`).join("")}</div></div>
   </div></section>`;
 }
 
@@ -701,13 +701,13 @@ async function pageToken(){
         <div class="legend">${alloc.map(([n, p, c]) => `<div><i style="background:${c}"></i>${esc(n)}<b class="num">${p}%</b></div>`).join("")}</div></div>
         <p class="side-note">Placeholder numbers. Final tokenomics will be published before launch.</p></div>
       <div class="panel pad"><h2 class="h3">What ${T()} does</h2><div class="feed" style="margin-top:8px">
-        ${CHAIN_ON ? `<div><span>💸 Staking: share of protocol fees</span><b>${pct(1 - CONFIG.LP_SHARE)}, in ${S()}</b></div><div><span>🛡 Resolution voting</span><b>1 token = 1 vote</b></div>
-        <div><span>🏗 Market creation bond</span><b>${num(CONFIG.CREATE_BOND)} ${T()}</b></div><div><span>🏷 Fee discounts</span><b class="muted">Planned</b></div>
-        <div><span>🗳 Governance</span><b class="muted">Planned</b></div></div>
+        ${CHAIN_ON ? `<div><span>${ic("coins", "g")}Staking: share of protocol fees</span><b>${pct(1 - CONFIG.LP_SHARE)}, in ${S()}</b></div><div><span>${ic("shield", "g")}Resolution voting</span><b>1 token = 1 vote</b></div>
+        <div><span>${ic("blocks", "g")}Market creation bond</span><b>${num(CONFIG.CREATE_BOND)} ${T()}</b></div><div><span>${ic("tag", "g")}Fee discounts</span><b class="muted">Planned</b></div>
+        <div><span>${ic("ballot", "g")}Governance</span><b class="muted">Planned</b></div></div>
         <p class="side-note">This is a free test token on BNB testnet. It has no value.</p></div>`
-        : `<div><span>💸 Fee discounts</span><b>Up to 50% off</b></div><div><span>🛡 Resolution voting</span><b>Earn rewards</b></div>
-        <div><span>🏗 Market creation bond</span><b>${num(CONFIG.CREATE_BOND)} ${T()}</b></div><div><span>🗳 Governance</span><b>Vote on fees & listings</b></div>
-        <div><span>🌱 Liquidity mining</span><b>Vault rewards</b></div></div></div>`}
+        : `<div><span>${ic("tag", "g")}Fee discounts</span><b>Up to 50% off</b></div><div><span>${ic("shield", "g")}Resolution voting</span><b>Earn rewards</b></div>
+        <div><span>${ic("blocks", "g")}Market creation bond</span><b>${num(CONFIG.CREATE_BOND)} ${T()}</b></div><div><span>${ic("ballot", "g")}Governance</span><b>Vote on fees & listings</b></div>
+        <div><span>${ic("sprout", "g")}Liquidity mining</span><b>Vault rewards</b></div></div></div>`}
     </div>
   </div></section>`;
 }
@@ -788,13 +788,13 @@ async function pageAdmin(){
     const lead = m.votes.YES === m.votes.NO ? "tie" : m.votes.YES > m.votes.NO ? "YES leads" : "NO leads";
     const voteBtns = m.open && !m.ownerVote && s.ownerStake > 0 ? `<button class="btn btn-ghost btn-sm" data-act="vote" data-id="${esc(m.id)}" data-side="YES">Vote YES</button><button class="btn btn-ghost btn-sm" data-act="vote" data-id="${esc(m.id)}" data-side="NO">Vote NO</button>` : "";
     const fin = !m.open && (m.votes.YES + m.votes.NO) >= Math.max(1e-9, s.v2 ? s.quorum : 0) ? `<button class="btn btn-grad btn-sm" data-act="finalize" data-id="${esc(m.id)}">Finalize vote</button>` : "";
-    return row(`<a href="${mHref(m.id)}">${esc(m.icon)} ${esc(m.q)}</a> ${m.ownerVote ? `<span class="tag ok">You voted ${esc(m.ownerVote)}</span>` : m.open ? `<span class="tag warn">You haven't voted</span>` : ""}`,
+    return row(`<a href="${mHref(m.id)}">${catIcon(m.icon)} ${esc(m.q)}</a> ${m.ownerVote ? `<span class="tag ok">You voted ${esc(m.ownerVote)}</span>` : m.open ? `<span class="tag warn">You haven't voted</span>` : ""}`,
       `YES <b class="num">${compactN(m.votes.YES)}</b> · NO <b class="num">${compactN(m.votes.NO)}</b> (${lead})${s.v2 ? ` · needs ${compactN(s.quorum)}` : ""}. ${m.open ? "Voting closes " + new Date(m.voteEnds).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : !(m.votes.YES + m.votes.NO) ? "Voting closed with no votes: set the result yourself." : (s.v2 && m.votes.YES + m.votes.NO < s.quorum) ? "Voting closed with too few votes: set the result yourself." : "Voting closed: finalize to pay winners."}`,
       `${voteBtns}${fin}<button class="btn btn-ghost btn-sm" data-act="finalize" data-id="${esc(m.id)}" data-outcome="YES">Set YES</button><button class="btn btn-ghost btn-sm" data-act="finalize" data-id="${esc(m.id)}" data-outcome="NO">Set NO</button>`);
-  }).join("") : `<p class="muted" style="padding:12px 0">No markets waiting for a result. 👍</p>`;
+  }).join("") : `<p class="muted" style="padding:12px 0">${ic("check", "g")} No markets waiting for a result.</p>`;
   const todo = checks.filter(c => c.includes('class="tag warn"') || c.includes('class="tag bad"')).length;
   return `<section class="page-head"><div class="wrap">
-    ${head("Safety panel", "Owner only. Fix each warning with one click (your wallet asks you to confirm), then open this page once a day.", `<a class="btn btn-ghost btn-sm" href="#/analytics">📈 Analytics</a><span class="tag ${todo ? "warn" : "ok"}">${todo ? todo + " to fix" : "All safe"}</span>`)}
+    ${head("Safety panel", "Owner only. Fix each warning with one click (your wallet asks you to confirm), then open this page once a day.", `<a class="btn btn-ghost btn-sm" href="#/analytics">${ic("analytics")}Analytics</a><span class="tag ${todo ? "warn" : "ok"}">${todo ? todo + " to fix" : "All safe"}</span>`)}
     <div class="panel pad"><h2 class="h3">Settings</h2>${checks.join("")}</div>
     <div class="panel pad" style="margin-top:16px"><h2 class="h3">Markets waiting for a result (${s.resolving.length})</h2>${queue}</div>
     <div class="panel pad" style="margin-top:16px"><h2 class="h3">${s.v2 ? "Still to do before mainnet" : "Fixed in the next contract upgrade (Step C)"}</h2>

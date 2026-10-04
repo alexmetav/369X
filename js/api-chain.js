@@ -305,7 +305,7 @@ function chainCategory(q, source){
   if(/gta|movie|film|album|music|game|oscar|netflix/.test(t)) return "Culture";
   return "World";
 }
-const CAT_ICONS = { Crypto: "₿", Sports: "⚽", Politics: "🗳", Finance: "📈", Culture: "🎮", World: "🌍" };
+const CAT_ICONS = { Crypto: "Crypto", Sports: "Sports", Politics: "Politics", Finance: "Finance", Culture: "Culture", World: "World" };   // drawn by catIcon()
 const CREATOR_SHARE = CONFIG.CREATOR_FEE / (CONFIG.CREATOR_FEE + CONFIG.PROTOCOL_FEE);
 
 function mapChainMarket(id, m, priceYes, ev){

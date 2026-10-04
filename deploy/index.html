@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>369X · Deploy contracts</title>
+<link rel="icon" type="image/png" href="/assets/logo.png">
+<link rel="stylesheet" href="/css/styles.css">
+<style>
+  .steps-list{display:grid;gap:8px;margin-top:18px}
+  .steps-list div{display:flex;justify-content:space-between;gap:12px;padding:12px 14px;border-radius:12px;border:1px solid var(--line);font-size:14px;color:var(--text-2)}
+  .steps-list div.done{border-color:rgba(124,242,106,.35);color:var(--text)}
+  .steps-list div.run{border-color:rgba(95,214,242,.5);color:var(--text)}
+  .steps-list div.fail{border-color:rgba(255,122,136,.5)}
+  .steps-list a{color:var(--cyan)}
+  pre{white-space:pre-wrap;word-break:break-all;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:12px;padding:14px;font-size:12px;margin-top:12px}
+  label.chk{display:flex;gap:10px;align-items:flex-start;margin-top:14px;font-size:14px;color:var(--text-2)}
+</style>
+</head>
+<body>
+<div class="glow a"></div><div class="glow b"></div>
+<main class="wrap" style="max-width:820px;padding-block:48px">
+  <a href="/"><img src="/assets/logo.png" alt="369X" style="height:34px;width:auto"></a>
+  <h1 class="h2" style="margin-top:28px">Deploy 369X contracts</h1>
+  <p class="lede">Publishes the 369X smart contracts to <b>BNB Smart Chain Testnet</b> from your own wallet. You will own them. Test networks use free test BNB, so this costs nothing real.</p>
+
+  <div class="panel pad" style="margin-top:24px">
+    <h2 class="h3">1. Connect your wallet</h2>
+    <p class="muted" id="who" style="margin-top:6px">Not connected.</p>
+    <div class="hero-cta" style="margin-top:14px"><button class="btn btn-grad" id="connect">Connect MetaMask</button>
+      <a class="btn btn-ghost" href="https://www.bnbchain.org/en/testnet-faucet" target="_blank" rel="noopener">Get free test BNB</a></div>
+  </div>
+
+  <div class="panel pad" style="margin-top:16px">
+    <h2 class="h3">2. Deploy</h2>
+    <p class="muted" style="margin-top:6px">MetaMask will ask you to confirm each step. Keep this page open until every step is ticked. If something stops halfway, press Deploy again and it continues where it left off.</p>
+    <label class="chk"><input type="checkbox" id="seed" checked> Also create the starting markets (one more confirmation each)</label>
+    <div class="hero-cta" style="margin-top:16px"><button class="btn btn-grad" id="go" disabled>Deploy</button><button class="btn btn-ghost" id="reset">Start over</button></div>
+    <div class="steps-list" id="steps"></div>
+  </div>
+
+  <div class="panel pad" style="margin-top:16px" id="resultBox" hidden>
+    <h2 class="h3">3. Send these addresses to Claude</h2>
+    <p class="muted" style="margin-top:6px">Copy this and paste it into the chat. Addresses are public, so they're safe to share.</p>
+    <pre id="result"></pre>
+    <button class="btn btn-ghost btn-sm" id="copy" style="margin-top:10px">Copy</button>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+</main>
+<script src="/js/vendor/ethers.umd.min.js"></script>
+<script src="/js/config.js"></script>
+<script src="/js/wallets.js"></script>
+<script src="/deploy/deploy.js"></script>
+</body>
+</html>

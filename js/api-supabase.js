@@ -24,6 +24,7 @@ const backend = {
       await SB.auth.signOut().catch(() => {});
       const { error } = await SB.auth.signInWithWeb3({
         chain: "ethereum",
+        wallet: wallet.provider(),          // the wallet we picked (MetaMask first), not whichever extension owns window.ethereum
         statement: `Sign in to ${CONFIG.SITE_NAME}. This is free and does not send a transaction.`,
         // sign for the site's base address (no #/page or ?ref part), which must be allowed in Supabase URL settings
         options: { url: location.origin + "/" }

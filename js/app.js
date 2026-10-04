@@ -64,6 +64,7 @@ function renderNav(){
         <div class="bal-row"><span>${S()}</span><b class="num">${ACC ? num(ACC.stable, 2) : "…"}</b></div>
         <div class="bal-row"><span>${T()}</span><b class="num">${ACC ? num(ACC.token) : "…"}</b></div>
         <div class="bal-row"><span>Network</span><b>${wallet.kind === "demo" ? "Demo wallet" : esc(CONFIG.CHAIN.chainName)}</b></div>
+        ${wallet.kind === "injected" ? `<div class="bal-row"><span>Wallet app</span><b>${esc(wallet.name)}</b></div>` : ""}
         <div class="sep"></div>
         <button data-act="faucet">💧 Get test funds</button>
         <a href="#/portfolio">📊 Portfolio</a>

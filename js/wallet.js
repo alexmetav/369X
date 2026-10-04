@@ -10,9 +10,12 @@ const wallet = {
   get kind(){ return store.get("wallet", null)?.kind || null; },
   chainId: null,
   get wrongChain(){ return this.kind === "injected" && this.chainId && this.chainId.toLowerCase() !== CONFIG.CHAIN.chainId.toLowerCase(); },
-  provider(){ return window.ethereum || null; },
+  picked: null,                                            // { info: {name, rdns}, provider } from Wallets.pick()
+  provider(){ return this.picked?.provider || null; },
+  get name(){ return this.picked?.info?.name || "Wallet"; },
 
   async connect(){
+    if(!this.picked){ await Wallets.discover(); this.picked = Wallets.pick(); }
     const eth = this.provider();
     if(!eth && backend.live){
       toast("Install MetaMask or open this site in your wallet app's browser", true);
@@ -55,6 +58,7 @@ const wallet = {
   // restore a previous session silently and follow account / network changes
   async init(){
     if(backend.live && this.kind === "demo") store.set("wallet", null);   // demo wallets can't sign in to the live backend
+    await Wallets.discover(); this.picked = Wallets.pick();
     const eth = this.provider(); if(!eth) return;
     try{
       this.chainId = await eth.request({ method: "eth_chainId" });

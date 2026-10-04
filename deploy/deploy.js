@@ -4,7 +4,7 @@
   const E = (n) => ethers.parseEther(String(n));
   const explorer = CONFIG.CHAIN.blockExplorerUrls[0];
   const WANT_CHAIN = BigInt(CONFIG.CHAIN.chainId);
-  let provider, signer, me, chainId, art;
+  let provider, signer, me, chainId, art, eth, walletName;
 
   // starting markets (same as the website); end = 23:59:59 UTC on that date
   const SEED = [
@@ -77,20 +77,23 @@
   }
 
   async function connect(){
-    if(!window.ethereum) return toast("Install MetaMask first", true);
-    provider = new ethers.BrowserProvider(window.ethereum);
-    await provider.send("eth_requestAccounts", []);
-    let net = await provider.getNetwork();
-    if(net.chainId !== WANT_CHAIN){
-      try{ await provider.send("wallet_switchEthereumChain", [{ chainId: CONFIG.CHAIN.chainId }]); }
-      catch(e){ if(e.code === 4902 || e.error?.code === 4902) await provider.send("wallet_addEthereumChain", [CONFIG.CHAIN]); else throw e; }
-      provider = new ethers.BrowserProvider(window.ethereum);
-      net = await provider.getNetwork();
+    await Wallets.discover();
+    const w = Wallets.pick();
+    if(!w) return toast("Install MetaMask first", true);
+    eth = w.provider; walletName = w.info.name;
+    await eth.request({ method: "eth_requestAccounts" });
+    let id = BigInt(await eth.request({ method: "eth_chainId" }));
+    if(id !== WANT_CHAIN){
+      try{ await eth.request({ method: "wallet_switchEthereumChain", params: [{ chainId: CONFIG.CHAIN.chainId }] }); }
+      catch(e){ if(e.code === 4902 || e.data?.originalError?.code === 4902) await eth.request({ method: "wallet_addEthereumChain", params: [CONFIG.CHAIN] }); else throw e; }
+      id = BigInt(await eth.request({ method: "eth_chainId" }));
     }
-    if(net.chainId !== WANT_CHAIN) return toast("Please switch MetaMask to " + CONFIG.CHAIN.chainName, true);
+    if(id !== WANT_CHAIN) return toast(`${walletName} is on network ${id}, not ${CONFIG.CHAIN.chainName} (97). Switch it in ${walletName} and try again.`, true);
+    provider = new ethers.BrowserProvider(eth);
+    const net = await provider.getNetwork();
     signer = await provider.getSigner(); me = await signer.getAddress(); chainId = net.chainId;
     const bal = Number(ethers.formatEther(await provider.getBalance(me)));
-    $("#who").innerHTML = `Connected: <b>${me.slice(0, 6)}…${me.slice(-4)}</b> on ${CONFIG.CHAIN.chainName} · Balance <b>${bal.toFixed(4)} tBNB</b>` +
+    $("#who").innerHTML = `Connected with <b>${walletName}</b>: <b>${me.slice(0, 6)}…${me.slice(-4)}</b> on ${CONFIG.CHAIN.chainName} · Balance <b>${bal.toFixed(4)} tBNB</b>` +
       (bal < 0.05 ? ` · <span style="color:var(--no)">You need about 0.05 tBNB. Use the faucet button.</span>` : "");
     $("#go").disabled = false;
     render(load(), steps($("#seed").checked));

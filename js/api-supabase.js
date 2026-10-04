@@ -24,9 +24,15 @@ const backend = {
       await SB.auth.signOut().catch(() => {});
       const { error } = await SB.auth.signInWithWeb3({
         chain: "ethereum",
-        statement: `Sign in to ${CONFIG.SITE_NAME}. This is free and does not send a transaction.`
+        statement: `Sign in to ${CONFIG.SITE_NAME}. This is free and does not send a transaction.`,
+        // sign for the site's base address (no #/page or ?ref part), which must be allowed in Supabase URL settings
+        options: { url: location.origin + "/" }
       });
-      if(error) throw new Error(error.message.includes("rejected") ? "Signature cancelled" : error.message);
+      if(error){
+        if(/rejected|denied/i.test(error.message)) throw new Error("Signature cancelled");
+        if(/URI which is not allowed/i.test(error.message)) throw new Error(`Sign-in is not set up for ${location.host} yet. Add it to Supabase > Authentication > URL Configuration.`);
+        throw new Error(error.message);
+      }
     }
     await rpc("ensure_profile", { p_ref: store.get("refBy", null) });
   },

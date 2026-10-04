@@ -14,6 +14,9 @@ async function main(){
   await m.createMarket("Will Bitcoin trade above $150K before Dec 31, 2026?", "CoinGecko BTC/USD price", now + 60 * 86400, E(0.41));
   await m.createMarket("Will the Fed cut rates at the November 2026 meeting?", "federalreserve.gov FOMC statement", now + 30 * 86400, E(0.62));
   await m.createMarket("Will this short test market resolve YES soon?", "[World] test source", now + 2 * 3600, E(0.5));
-  console.log(JSON.stringify({ usdt: await usdt.getAddress(), token: await tok.getAddress(), market: await m.getAddress(), owner: owner.address }));
+  const V = await ethers.getContractFactory("Vault369X"), S = await ethers.getContractFactory("Stake369X");
+  const vault = await V.deploy(usdt, m), st = await S.deploy(tok, usdt, m);
+  await vault.setStaking(st); await m.setFeeRecipient(vault); await m.setResolver(st); await tok.transfer(st, E(1_000_000));
+  console.log(JSON.stringify({ usdt: await usdt.getAddress(), token: await tok.getAddress(), market: await m.getAddress(), owner: owner.address, vault: await vault.getAddress(), staking: await st.getAddress() }));
 }
 main().catch(e => { console.error(e); process.exit(1); });

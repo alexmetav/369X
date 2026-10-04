@@ -23,12 +23,15 @@
   ].filter(([, , d]) => Date.parse(d + "T23:59:59Z") > Date.now() + 2 * 3600e3);
 
   const RESERVE = 1_000_000;
+  const C = CONFIG.CONTRACTS || {};
+  const PHASE2 = !!C.market;                 // core contracts exist: this page now adds the vault + staking
+  const REWARD_POOL = 1_000_000;
 
   function toast(msg, bad){
     const t = $("#toast"); t.textContent = msg; t.style.color = bad ? "var(--no)" : "";
     t.classList.add("show"); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("show"), 3500);
   }
-  const key = () => `369x:deploy:${chainId}:${me}`;
+  const key = () => `369x:deploy${PHASE2 ? "2" : ""}:${chainId}:${me}`;
   const load = () => { try{ return JSON.parse(localStorage.getItem(key())) || { done: {} }; }catch(e){ return { done: {} }; } };
   const save = (s) => { try{ localStorage.setItem(key(), JSON.stringify(s)); }catch(e){} };
 
@@ -45,8 +48,22 @@
   }
   const token = (addr) => new ethers.Contract(addr, art.TestToken.abi, signer);
   const market = (addr) => new ethers.Contract(addr, art.Market369X.abi, signer);
+  const vault = (addr) => new ethers.Contract(addr, art.Vault369X.abi, signer);
+
+  // stage 2: vault + staking, wired into the existing market
+  function steps2(){
+    return [
+      { id: "vault", label: "Create the vault contract", run: async (s) => { const r = await deployContract("Vault369X", [C.usdt, C.market]); s.vault = r.address; return r; } },
+      { id: "stake", label: "Create the staking contract", run: async (s) => { const r = await deployContract("Stake369X", [C.token, C.usdt, C.market]); s.staking = r.address; return r; } },
+      { id: "link", label: "Tell the vault where the stakers' 20% of fees goes", run: async (s) => send(vault(s.vault), "setStaking", [s.staking]) },
+      { id: "fees", label: "Send the market's protocol fees to the vault", run: async (s) => send(market(C.market), "setFeeRecipient", [s.vault]) },
+      { id: "resolver", label: "Let stakers' votes settle markets", run: async (s) => send(market(C.market), "setResolver", [s.staking]) },
+      { id: "pool", label: `Fund voting rewards (${REWARD_POOL.toLocaleString()} t369X)`, run: async (s) => send(token(C.token), "transfer", [s.staking, E(REWARD_POOL)]) }
+    ];
+  }
 
   function steps(seed){
+    if(PHASE2) return steps2();
     const list = [
       { id: "usdt", label: "Create test USDT token (faucet: 1,000 a day)", run: async (s) => { const r = await deployContract("TestToken", ["369X Test USDT", "tUSDT", E(1000), E(10_000_000)]); s.usdt = r.address; return r; } },
       { id: "token", label: "Create test $369X token (faucet: 5,000 a day)", run: async (s) => { const r = await deployContract("TestToken", ["369X Test Token", "t369X", E(5000), E(3_690_000_000)]); s.token = r.address; return r; } },
@@ -71,6 +88,11 @@
     const all = list.every(st => state.done[st.id]);
     $("#reset").hidden = all;                 // nothing to restart once everything is deployed
     $("#go").hidden = all;
+    if(PHASE2){
+      $("#resultBox").hidden = !state.vault;
+      if(state.vault) $("#result").textContent = JSON.stringify({ network: CONFIG.CHAIN.chainName, chainId: Number(chainId), vault: state.vault, staking: state.staking || null, complete: all }, null, 2);
+      return;
+    }
     $("#resultBox").hidden = !state.market;
     if(state.market) $("#result").textContent = JSON.stringify({
       network: CONFIG.CHAIN.chainName, chainId: Number(chainId), owner: me,
@@ -97,6 +119,8 @@
     const bal = Number(ethers.formatEther(await provider.getBalance(me)));
     $("#who").innerHTML = `Connected with <b>${walletName}</b>: <b>${me.slice(0, 6)}…${me.slice(-4)}</b> on ${CONFIG.CHAIN.chainName} · Balance <b>${bal.toFixed(4)} tBNB</b>` +
       (bal < 0.05 ? ` · <span style="color:var(--no)">You need about 0.05 tBNB. Use the faucet button.</span>` : "");
+    if(PHASE2 && me.toLowerCase() !== String(C.owner).toLowerCase())
+      return toast(`Connect with the wallet that owns the market (${C.owner.slice(0, 6)}…${C.owner.slice(-4)}). Switch account in MetaMask.`, true);
     $("#go").disabled = false;
     render(load(), steps($("#seed").checked));
   }
@@ -121,6 +145,11 @@
     toast("All done. Copy the addresses below and send them to Claude.");
   }
 
+  if(PHASE2){
+    document.querySelector("h1").textContent = "Add the vault and staking";
+    document.querySelector(".lede").innerHTML = "Your markets are already live. This adds the <b>liquidity vault</b> and <b>$369X staking</b> contracts and connects them to your market. About 6 MetaMask confirmations, paid in free test BNB.";
+    $("#seed").closest("label").hidden = true;
+  }
   $("#connect").onclick = () => connect().catch(e => toast(e.shortMessage || e.message, true));
   $("#go").onclick = go;
   $("#seed").onchange = () => me && render(load(), steps($("#seed").checked));

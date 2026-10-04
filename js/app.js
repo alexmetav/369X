@@ -115,7 +115,7 @@ async function pageHome(){
       <div class="hero-cta"><a class="btn btn-grad" href="#/markets">Start trading</a><a class="btn btn-ghost" href="#/create">Create a market</a></div>
       <div class="hero-stats">
         <div><b class="num">${compact(all.reduce((a, m) => a + m.vol, 0))}</b><small>Volume traded</small></div>
-        <div><b class="num">${compact(vault.tvl)}</b><small>${CHAIN_ON ? "Protocol reserve" : "Vault liquidity"}</small></div>
+        <div><b class="num">${compact(vault.tvl)}</b><small>${CHAIN_ON && !CONFIG.CONTRACTS.vault ? "Protocol reserve" : "Vault liquidity"}</small></div>
         <div><b class="num">${live.length}</b><small>Live markets</small></div>
       </div>
     </div>
@@ -237,7 +237,37 @@ function feedRows(m){
   return m.feed.length ? m.feed.slice(0, 12).map(f => `<div><span><span class="num">${esc(short(f.addr))}</span> ${f.buy === false ? "sold" : "bought"} <b class="${f.side === "YES" ? "y" : "n"}">${esc(f.side)}</b> at ${cents(f.price)}</span><span class="num">${money(f.amount)} · ${ago(f.ts)}</span></div>`).join("")
     : `<div><span>No trades yet. Be the first.</span></div>`;
 }
+// blockchain time when on-chain (contracts decide by block time), else this computer's clock
+const nowMs = () => (typeof CHAIN_ON !== "undefined" && CHAIN_ON) ? Chain.now() : Date.now();
+function chainVoteBox(m){
+  const tot = m.votes.YES + m.votes.NO, my = ACC?.votes?.[m.id], open = nowMs() < (m.voteEnds || 0);
+  const bar = `<div class="bar" style="margin-top:16px"><i style="width:${tot ? (m.votes.YES / tot * 100).toFixed(1) : 50}%"></i></div>
+    <div class="mfoot"><span class="num">YES ${compactN(m.votes.YES)}${tot ? " (" + pct(m.votes.YES / tot) + ")" : ""}</span><span class="num">NO ${compactN(m.votes.NO)}</span></div>`;
+  const admin = ACC?.isAdmin && m.status === "resolving" ? `<details style="margin-top:12px"><summary class="muted" style="cursor:pointer;font-size:13px">Admin: settle now without waiting</summary>
+    <div class="yn"><button class="yes" data-act="finalize" data-id="${esc(m.id)}" data-outcome="YES"><span>Resolve YES</span></button><button class="no" data-act="finalize" data-id="${esc(m.id)}" data-outcome="NO"><span>Resolve NO</span></button></div></details>` : "";
+  if(m.status === "resolved"){
+    const won = my && my.side === m.outcome;
+    return `<div class="panel pad"><h2 class="h3">Market resolved</h2>
+      <b style="display:block;font-family:var(--display);font-size:40px;font-weight:500;margin-top:10px" class="${m.outcome === "YES" ? "pos" : "neg"}">${esc(m.outcome)}</b>
+      <p class="muted">Winning shares pay 1 ${S()} each. Redeem them from your portfolio.</p>${tot ? bar : ""}
+      ${my ? `<div class="info">You voted <b>${esc(my.side)}</b> with ${tok(my.weight)}.</div>` : ""}
+      ${won && !m.finalized ? `<button class="btn btn-ghost" style="width:100%;margin-top:12px" data-act="finalize" data-id="${esc(m.id)}">Record result to unlock your reward</button>` : ""}
+      ${won && m.finalized && !my.claimed ? `<button class="btn btn-grad" style="width:100%;margin-top:12px" data-act="claimVote" data-id="${esc(m.id)}">Claim ${tok(my.weight * 0.01)} reward</button>` : ""}
+      ${won && my.claimed ? `<p class="side-note">Reward claimed.</p>` : ""}</div>`;
+  }
+  return `<div class="panel pad"><h2 class="h3">Vote on the result</h2>
+    <p class="muted" style="margin-top:6px">Trading has ended. ${T()} stakers vote using <b>${esc(m.source)}</b>. ${open ? "Voting closes " + new Date(m.voteEnds).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) + "." : "Voting has closed."} Correct voters earn 1% of their stake.</p>
+    ${bar}
+    ${my ? `<div class="info">You voted <b>${esc(my.side)}</b> with ${tok(my.weight)}.</div>`
+      : open ? (ACC?.staked > 0 ? `<div class="yn"><button class="yes" data-act="vote" data-id="${esc(m.id)}" data-side="YES"><span>Vote YES</span></button><button class="no" data-act="vote" data-id="${esc(m.id)}" data-side="NO"><span>Vote NO</span></button></div>`
+        : `<div class="info"><a href="#/stake" style="color:var(--cyan)">Stake ${T()}</a> to vote on this result.</div>`) : ""}
+    ${!open && tot > 0 ? `<button class="btn btn-grad" style="width:100%;margin-top:12px" data-act="finalize" data-id="${esc(m.id)}">Finalize result</button>` : ""}
+    ${!open && tot === 0 ? `<p class="side-note">Nobody voted. The admin will settle this market.</p>` : ""}
+    ${admin}
+  </div>`;
+}
 function resolveBox(m){
+  if(CHAIN_ON && CONFIG.CONTRACTS.staking) return chainVoteBox(m);
   const tot = m.votes.YES + m.votes.NO || 1, myVote = ACC?.votes?.[m.id];
   if(m.status === "resolved") return `<div class="panel pad"><h2 class="h3">Market resolved</h2>
     <b style="display:block;font-family:var(--display);font-size:40px;font-weight:500;margin-top:10px" class="${m.outcome === "YES" ? "pos" : "neg"}">${esc(m.outcome)}</b>
@@ -381,13 +411,14 @@ async function pagePortfolio(){
 
 /* ---------- vault ---------- */
 async function pageVault(){
-  if(CHAIN_ON) return chainSoon("Liquidity vault", "The vault is being moved on-chain. You'll deposit test USDT, choose a lock period for up to 8× points, and earn 80% of protocol fees.");
+  if(CHAIN_ON && !CONFIG.CONTRACTS.vault) return chainSoon("Liquidity vault", "The vault is being moved on-chain. You'll deposit test USDT, choose a lock period for up to 8× points, and earn 80% of protocol fees.");
   const v = await api.getVault(), a = ACC, L = CONFIG.LOCKS.find(x => x.id === vState.lock);
+  vState.apy = v.apy;
   return `<section class="page-head"><div class="wrap">
     ${head("Liquidity vault", `Deposit ${S()} into the protocol vault. Depositors earn ${pct(CONFIG.LP_SHARE)} of protocol fees from every trade, and longer locks earn points faster.`)}
     <div class="stat-grid">
       <div class="panel stat"><small>Total deposited</small><b class="num">${compact(v.tvl)}</b></div>
-      <div class="panel stat"><small>Lent to traders</small><b class="num">${pct(v.utilization, 1)}</b></div>
+      <div class="panel stat"><small>${CHAIN_ON ? "Your deposits" : "Lent to traders"}</small><b class="num">${CHAIN_ON ? money((a?.deposits || []).reduce((s, d) => s + d.amount, 0), 2) : pct(v.utilization, 1)}</b></div>
       <div class="panel stat"><small>Est. APY</small><b class="num pos">${pct(v.apy, 1)}</b></div>
       <div class="panel stat"><small>Fees paid to depositors</small><b class="num">${compact(v.fees)}</b></div>
     </div>
@@ -403,8 +434,8 @@ async function pageVault(){
       </div>
       <div class="panel pad">
         <h2 class="h3">Your deposits</h2>
-        ${a && a.deposits.length ? `<div class="feed" style="margin-top:8px">${a.deposits.map(d => `<div><span><b style="color:var(--text)" class="num">${money(d.amount, 2)}</b> · ${CONFIG.LOCKS.find(x => x.id === d.lock).label} · ${d.mult}× points<br><small class="muted">${d.unlock > Date.now() ? "Unlocks " + fmtDate(new Date(d.unlock).toISOString()) : "Unlocked"}</small></span>
-          <button class="btn btn-ghost btn-sm" data-act="withdraw" data-id="${esc(d.id)}" ${d.unlock > Date.now() ? "disabled style='opacity:.4'" : ""}>Withdraw</button></div>`).join("")}</div>` : `<p class="muted" style="margin-top:6px">No deposits yet.</p>`}
+        ${a && a.deposits.length ? `<div class="feed" style="margin-top:8px">${a.deposits.map(d => `<div><span><b style="color:var(--text)" class="num">${money(d.amount, 2)}</b> · ${CONFIG.LOCKS.find(x => x.id === d.lock).label} · ${d.mult}× points<br><small class="muted">${d.unlock > nowMs() ? "Unlocks " + fmtDate(new Date(d.unlock).toISOString()) : "Unlocked"}${d.earned != null ? ` · earned <b class="pos num">${money(d.earned, 4)}</b>` : ""}</small></span>
+          <span style="display:flex;gap:6px">${CHAIN_ON && d.earned > 0.0001 ? `<button class="btn btn-ghost btn-sm" data-act="claimVault" data-id="${esc(d.id)}">Claim</button>` : ""}<button class="btn btn-ghost btn-sm" data-act="withdraw" data-id="${esc(d.id)}" ${d.unlock > nowMs() ? "disabled style='opacity:.4'" : ""}>Withdraw</button></span></div>`).join("")}</div>` : `<p class="muted" style="margin-top:6px">No deposits yet.</p>`}
         <div class="info">Today the vault earns a share of every trading fee. When leverage launches, it will also lend to leveraged traders, who are closed out before their losses reach the vault. Deposits can still lose money in extreme moves.</div>
       </div>
     </div>
@@ -414,13 +445,44 @@ function updateVaultSum(){
   const el = $("#vsum"); if(!el) return;
   const amt = Math.max(0, +$("#vamt").value || 0), L = CONFIG.LOCKS.find(x => x.id === vState.lock);
   el.innerHTML = `<div><span>Points per day</span><b class="num">${num(amt * L.mult)}</b></div>
-    <div><span>Est. yearly earnings</span><b class="num">${money(amt * CONFIG.VAULT_APY_HINT, 2)}</b></div>
+    <div><span>Est. yearly earnings</span><b class="num">${money(amt * (vState.apy ?? CONFIG.VAULT_APY_HINT), 2)}</b></div>
     <div><span>Unlocks</span><b>${L.days ? fmtDate(addDays(L.days)) : "Any time"}</b></div>`;
 }
 
 /* ---------- stake ---------- */
+async function pageStakeChain(){
+  const a = ACC, isStake = vState.stakeTab === "stake", locked = a && a.lockedUntil > nowMs();
+  return `<section class="page-head"><div class="wrap">
+    ${head("Stake " + T(), `Stakers earn ${pct(1 - CONFIG.LP_SHARE)} of protocol fees in ${S()}, vote on how markets resolve, and earn ${T()} for voting with the final outcome.`, `<a class="btn btn-ghost" href="#/resolve">Resolution queue</a>`)}
+    <div class="stat-grid">
+      <div class="panel stat"><small>You have staked</small><b class="num">${a ? num(a.staked) : "0"}</b><em>${locked ? "Locked until " + fmtDate(new Date(a.lockedUntil).toISOString()) : ""}</em></div>
+      <div class="panel stat"><small>In your wallet</small><b class="num">${a ? num(a.token) : "0"}</b></div>
+      <div class="panel stat"><small>Fees earned</small><b class="num pos">${a ? money(a.stakeFees || 0, 4) : "$0"}</b>${a && a.stakeFees > 0.0001 ? `<button class="btn btn-ghost btn-sm" style="margin-top:8px" data-act="claimStakeFees">Claim</button>` : ""}</div>
+      <div class="panel stat"><small>Voting power</small><b class="num">${a ? compactN(a.staked) : "0"}</b></div>
+    </div>
+    <div class="two">
+      <div class="panel pad">
+        <div class="tabs"><button class="${isStake ? "on" : ""}" data-act="stakeTab" data-v="stake">Stake</button><button class="${!isStake ? "on" : ""}" data-act="stakeTab" data-v="unstake">Unstake</button></div>
+        ${!wallet.address ? `<button class="btn btn-grad" data-act="connect">Connect wallet</button>` : `
+        <div class="field" style="margin-top:0"><label for="samt" style="display:flex;justify-content:space-between"><span>Amount (${T()})</span><span class="num">${isStake ? "Wallet " + num(a.token) : "Staked " + num(a.staked)}</span></label>
+          <div class="field-row"><input class="input num" id="samt" type="number" min="1" step="any" value=""><button class="btn btn-ghost" data-act="stakeMax">Max</button></div></div>
+        <button class="btn btn-grad" style="width:100%;margin-top:16px;height:48px" data-act="${isStake ? "stake" : "unstake"}" ${!isStake && locked ? "disabled style='opacity:.45'" : ""}>${isStake ? "Stake" : "Unstake"}</button>
+        ${!isStake && locked ? `<p class="side-note">You voted on a market, so your stake is locked until its voting closes.</p>` : ""}
+        ${a.token < 1 && a.staked < 1 ? `<div class="info">No ${T()} yet? <button style="color:var(--lime);font-weight:600" data-act="faucet">Get test tokens</button></div>` : ""}`}
+      </div>
+      <div class="panel pad"><h2 class="h3">What staking does</h2><div class="feed" style="margin-top:8px">
+        <div><span>💸 Share of protocol fees</span><b>${pct(1 - CONFIG.LP_SHARE)}, in ${S()}</b></div>
+        <div><span>🛡 Vote on market results</span><b>1 token = 1 vote</b></div>
+        <div><span>🎯 Reward for correct votes</span><b>1% of your stake</b></div>
+        <div><span>🏷 Trading fee discounts</span><b class="muted">Next market upgrade</b></div>
+      </div><p class="side-note">After you vote, your stake stays locked until that market's voting closes, so nobody can vote twice with the same tokens.</p></div>
+    </div>
+  </div></section>`;
+}
+
 async function pageStake(){
-  if(CHAIN_ON) return chainSoon("Stake $369X", "Staking is being moved on-chain. You'll stake test $369X for fee discounts of up to 50% and vote on how markets resolve.");
+  if(CHAIN_ON && CONFIG.CONTRACTS.staking) return pageStakeChain();
+  if(CHAIN_ON && !CONFIG.CONTRACTS.staking) return chainSoon("Stake $369X", "Staking is being moved on-chain. You'll stake test $369X for fee discounts of up to 50% and vote on how markets resolve.");
   const a = ACC, tier = a ? a.stakeTier : CONFIG.STAKE_TIERS[0];
   const next = CONFIG.STAKE_TIERS[CONFIG.STAKE_TIERS.indexOf(tier) + 1];
   const prog = next ? Math.min(100, ((a?.staked || 0) - tier.min) / (next.min - tier.min) * 100) : 100;
@@ -456,7 +518,7 @@ async function pageResolve(){
   return `<section class="page-head"><div class="wrap">
     ${head("Resolution", `When a market ends, ${T()} stakers vote on the result using its resolution source. Vote with the final outcome to earn rewards.`, `<a class="btn btn-ghost" href="#/stake">Stake to vote</a>`)}
     <h2 class="h3" style="margin-bottom:12px">Waiting for votes (${pending.length})</h2>
-    <div class="grid">${pending.length ? pending.map(m => `<div>${resolveBox(m).replace('<h2 class="h3">Awaiting resolution</h2>', `<a class="h3" style="display:block" href="${mHref(m.id)}">${esc(m.icon)} ${esc(m.q)}</a><div class="mcat">Ended ${fmtDate(m.ends)}</div>`)}</div>`).join("") : `<div class="panel empty" style="grid-column:1/-1">Nothing to resolve right now.</div>`}</div>
+    <div class="grid">${pending.length ? pending.map(m => `<div>${resolveBox(m).replace(/<h2 class="h3">[^<]*<\/h2>/, `<a class="h3" style="display:block" href="${mHref(m.id)}">${esc(m.icon)} ${esc(m.q)}</a><div class="mcat">Ended ${fmtDate(m.ends)}</div>`)}</div>`).join("") : `<div class="panel empty" style="grid-column:1/-1">Nothing to resolve right now.</div>`}</div>
     <h2 class="h3" style="margin:32px 0 12px">Recently resolved</h2>
     <div class="grid">${done.slice(0, 6).map(marketCard).join("") || `<div class="panel empty" style="grid-column:1/-1">None yet.</div>`}</div>
   </div></section>`;
@@ -801,6 +863,15 @@ const ACTIONS = {
     await busy(el, "Finalizing…", async () => { const r = await api.finalize({ id: el.dataset.id, outcome: el.dataset.outcome }); toast("Resolved " + r.outcome); await refreshAccount(); route(true); });
   },
   lb(el){ vState.lb = el.dataset.v; route(true); },
+  async claimVault(el){
+    await busy(el, "Claiming…", async () => { await api.claimVault({ id: el.dataset.id }); toast("Vault earnings sent to your wallet"); await refreshAccount(); route(true); });
+  },
+  async claimStakeFees(el){
+    await busy(el, "Claiming…", async () => { await api.claimStakeFees(); toast("Staking fees sent to your wallet"); await refreshAccount(); route(true); });
+  },
+  async claimVote(el){
+    await busy(el, "Claiming…", async () => { await api.claimVoteReward({ id: el.dataset.id }); toast("Voting reward sent to your wallet"); await refreshAccount(); route(true); });
+  },
   async redeem(el){
     await busy(el, "Redeeming…", async () => { await api.redeem({ id: el.dataset.id }); toast("Winnings paid to your wallet"); await refreshAccount(); route(true); });
   },

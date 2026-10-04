@@ -35,6 +35,39 @@ const MARKET_ABI = [
   "event Redeemed(uint256 indexed id, address indexed user, uint256 amount)"
 ];
 
+const VAULT_ABI = [
+  "function deposit(uint256,uint8) returns (uint256)",
+  "function claim(uint256)",
+  "function withdraw(uint256)",
+  "function harvest()",
+  "function depositsOf(address) view returns (tuple(uint128 amount,uint64 start,uint64 unlock,uint8 lock,bool closed,uint256 debt)[] list, uint256[] pending)",
+  "function pointsOf(address) view returns (uint256)",
+  "function totalDeposits() view returns (uint256)",
+  "function totalFeesToLps() view returns (uint256)",
+  "function pendingFees() view returns (uint256)",
+  "function lpShareBps() view returns (uint256)",
+  "function startTime() view returns (uint256)"
+];
+const STAKE_ABI = [
+  "function stake(uint256)",
+  "function unstake(uint256)",
+  "function claimFees()",
+  "function vote(uint256,bool)",
+  "function finalize(uint256)",
+  "function claimVoteReward(uint256)",
+  "function staked(address) view returns (uint256)",
+  "function totalStaked() view returns (uint256)",
+  "function lockedUntil(address) view returns (uint256)",
+  "function pendingFees(address) view returns (uint256)",
+  "function votingPeriod() view returns (uint256)",
+  "function voteRewardBps() view returns (uint256)",
+  "function rewardPool() view returns (uint256)",
+  "function tallies(uint256) view returns (uint256 yes, uint256 no, bool finalized, bool outcomeYes)",
+  "function voteOf(uint256,address) view returns (tuple(bool voted,bool yes,bool claimed,uint256 weight))"
+];
+const HAS_VAULT = () => !!CONFIG.CONTRACTS?.vault, HAS_STAKING = () => !!CONFIG.CONTRACTS?.staking;
+const LOCK_IDS = ["flex", "d90", "d180", "d365"];
+
 const Chain = {
   read: null, iface: null, logs: null,
   fmt: (x) => Number(ethers.formatEther(x)),
@@ -55,6 +88,9 @@ const Chain = {
   },
   async market(){ return new ethers.Contract(CONFIG.CONTRACTS.market, MARKET_ABI, await Chain.readProvider()); },
   async token(addr){ return new ethers.Contract(addr, TOKEN_ABI, await Chain.readProvider()); },
+  async vault(){ return new ethers.Contract(CONFIG.CONTRACTS.vault, VAULT_ABI, await Chain.readProvider()); },
+  async staking(){ return new ethers.Contract(CONFIG.CONTRACTS.staking, STAKE_ABI, await Chain.readProvider()); },
+  votingPeriod: null,
 
   // signer from the picked wallet (MetaMask first), on the right network
   async signer(){
@@ -79,11 +115,11 @@ const Chain = {
     if(/insufficient funds/i.test(m)) return "Not enough tBNB to pay the network fee. Get free tBNB from the BNB testnet faucet.";
     return m.replace(/^execution reverted:?\s*/i, "").replace(/^Faucet: /, "");
   },
-  async ensureAllowance(tokenAddr, amountWei){
+  async ensureAllowance(tokenAddr, amountWei, spender = CONFIG.CONTRACTS.market){
     const me = wallet.address, t = await Chain.token(tokenAddr);
-    if((await t.allowance(me, CONFIG.CONTRACTS.market)) >= amountWei) return;
+    if((await t.allowance(me, spender)) >= amountWei) return;
     toast("Approve the token in your wallet (one time)");
-    await Chain.write(tokenAddr, TOKEN_ABI, "approve", [CONFIG.CONTRACTS.market, ethers.MaxUint256]);
+    await Chain.write(tokenAddr, TOKEN_ABI, "approve", [spender, ethers.MaxUint256]);
   },
 
   // ---- event history (cached in the browser, scanned in chunks) ----
@@ -164,8 +200,17 @@ function mapChainMarket(id, m, priceYes, ev){
 
 async function loadChainMarkets(){
   const mk = await Chain.market(), [count, h] = await Promise.all([mk.marketCount(), Chain.history()]);
-  const rows = await Promise.all([...Array(Number(count)).keys()].map(i => mk.getMarket(i)));
-  return rows.map(([m, p], i) => mapChainMarket(i, m, p, h.events));
+  const ids = [...Array(Number(count)).keys()];
+  const rows = await Promise.all(ids.map(i => mk.getMarket(i)));
+  const list = rows.map(([m, p], i) => mapChainMarket(i, m, p, h.events));
+  if(HAS_STAKING()){
+    const st = await Chain.staking();
+    if(Chain.votingPeriod === null) Chain.votingPeriod = Number(await st.votingPeriod()) * 1000;
+    const ended = list.filter(m => m.status !== "live");
+    const tallies = await Promise.all(ended.map(m => st.tallies(Number(m.id))));
+    ended.forEach((m, i) => { const t = tallies[i]; m.votes = { YES: Chain.fmt(t.yes), NO: Chain.fmt(t.no) }; m.finalized = t.finalized; m.voteEnds = m.endMs + Chain.votingPeriod; });
+  }
+  return list;
 }
 
 if(CHAIN_ON){
@@ -183,7 +228,14 @@ if(CHAIN_ON){
       const mk = await Chain.market();
       if(!(i >= 0 && i < Number(await mk.marketCount()))) throw new Error("Market not found");
       const [[m, p], h] = await Promise.all([mk.getMarket(i), Chain.history()]);
-      return mapChainMarket(i, m, p, h.events);
+      const out = mapChainMarket(i, m, p, h.events);
+      if(HAS_STAKING() && out.status !== "live"){
+        const st = await Chain.staking();
+        if(Chain.votingPeriod === null) Chain.votingPeriod = Number(await st.votingPeriod()) * 1000;
+        const t = await st.tallies(i);
+        out.votes = { YES: Chain.fmt(t.yes), NO: Chain.fmt(t.no) }; out.finalized = t.finalized; out.voteEnds = out.endMs + Chain.votingPeriod;
+      }
+      return out;
     },
     async placeTrade({ marketId, side, margin }){
       const amt = Chain.wei(margin), yes = side === "YES", mk = await Chain.market();
@@ -245,8 +297,25 @@ if(CHAIN_ON){
         bonds: Object.fromEntries(created.map(m => [m.id, m.bond])), feeRate: CONFIG.CREATOR_FEE + CONFIG.PROTOCOL_FEE,
         isAdmin: [owner, resolver].some(a => a.toLowerCase() === me)
       };
-      u.points = { total: Math.round(volume), parts: { Trading: Math.round(volume) } };
+      let vaultPts = 0;
+      if(HAS_VAULT()){
+        const v = await Chain.vault(), [[list, pending], pts] = await Promise.all([v.depositsOf(w), v.pointsOf(w)]);
+        u.deposits = list.map((d, i) => ({ id: String(i), amount: Chain.fmt(d.amount), lock: LOCK_IDS[Number(d.lock)], mult: [1, 2, 4, 8][Number(d.lock)],
+          start: Number(d.start) * 1000, unlock: Number(d.unlock) * 1000, earned: Chain.fmt(pending[i]), closed: d.closed })).filter(d => !d.closed);
+        vaultPts = Chain.fmt(pts);
+      }
+      if(HAS_STAKING()){
+        const st = await Chain.staking();
+        const [s, lock, fees] = await Promise.all([st.staked(w), st.lockedUntil(w), st.pendingFees(w)]);
+        u.staked = Chain.fmt(s); u.lockedUntil = Number(lock) * 1000; u.stakeFees = Chain.fmt(fees);
+        const ended = markets.filter(m => m.status !== "live");
+        const vs = await Promise.all(ended.map(m => st.voteOf(Number(m.id), w)));
+        ended.forEach((m, i) => { if(vs[i].voted) u.votes[m.id] = { side: vs[i].yes ? "YES" : "NO", weight: Chain.fmt(vs[i].weight), claimed: vs[i].claimed }; });
+      }
+      u.points = { parts: { Trading: Math.round(volume), Vault: Math.round(vaultPts) } };
       u.badges = Engine.badges(u, false); u.stakeTier = Engine.stakeTier(0);
+      u.points.parts.Badges = u.badges.filter(b => b.got).length * 500;
+      u.points.total = Object.values(u.points.parts).reduce((a, b) => a + b, 0);
       return u;
     },
     async faucet(w){
@@ -267,16 +336,52 @@ if(CHAIN_ON){
       const ev = rc.logs.map(l => { try{ return mk.interface.parseLog(l); }catch(e){ return null; } }).find(e => e?.name === "MarketCreated");
       return { ok: true, id: ev ? String(ev.args.id) : "0" };
     },
-    // admin settles a market on-chain
+    // with an outcome: admin settles directly on the market. Without: stakers' vote result is written (anyone can do this).
     async finalize({ id, outcome }){
-      if(!outcome) throw new Error("Choose YES or NO");
-      await Chain.write(CONFIG.CONTRACTS.market, MARKET_ABI, "resolve", [Number(id), outcome === "YES", false]);
-      return { ok: true, outcome };
+      if(outcome){
+        await Chain.write(CONFIG.CONTRACTS.market, MARKET_ABI, "resolve", [Number(id), outcome === "YES", false]);
+        return { ok: true, outcome };
+      }
+      if(!HAS_STAKING()) throw new Error("Choose YES or NO");
+      await Chain.write(CONFIG.CONTRACTS.staking, STAKE_ABI, "finalize", [Number(id)]);
+      const t = await (await Chain.staking()).tallies(Number(id));
+      return { ok: true, outcome: t.outcomeYes ? "YES" : "NO" };
     },
+    async vote({ id, side }){
+      await Chain.write(CONFIG.CONTRACTS.staking, STAKE_ABI, "vote", [Number(id), side === "YES"]);
+      return { ok: true };
+    },
+    async claimVoteReward({ id }){ await Chain.write(CONFIG.CONTRACTS.staking, STAKE_ABI, "claimVoteReward", [Number(id)]); return { ok: true }; },
     async getVault(){
-      const mk = await Chain.market(), r = Chain.fmt(await mk.reserve());
-      return { tvl: r, borrowed: 0, fees: 0, utilization: 0, apy: 0 };
+      if(!HAS_VAULT()){ const mk = await Chain.market(); return { tvl: Chain.fmt(await mk.reserve()), borrowed: 0, fees: 0, utilization: 0, apy: 0 }; }
+      const v = await Chain.vault();
+      const [tvl, paid, pend, share, start] = await Promise.all([v.totalDeposits(), v.totalFeesToLps(), v.pendingFees(), v.lpShareBps(), v.startTime()]);
+      const fees = Chain.fmt(paid) + Chain.fmt(pend) * Number(share) / 10000, t = Chain.fmt(tvl);
+      const days = Math.max(1, (Chain.now() - Number(start) * 1000) / 864e5);
+      return { tvl: t, borrowed: 0, fees, utilization: 0, apy: t > 0 ? fees / t * 365 / days : 0 };
     },
+    async deposit({ amount, lock }){
+      const amt = Chain.wei(amount);
+      if((await (await Chain.token(CONFIG.CONTRACTS.usdt)).balanceOf(wallet.address)) < amt) throw new Error("Not enough test USDT");
+      await Chain.ensureAllowance(CONFIG.CONTRACTS.usdt, amt, CONFIG.CONTRACTS.vault);
+      await Chain.write(CONFIG.CONTRACTS.vault, VAULT_ABI, "deposit", [amt, LOCK_IDS.indexOf(lock)]);
+      return { ok: true };
+    },
+    async withdraw({ id }){
+      const d = (await api.getAccount(wallet.address)).deposits.find(x => x.id === String(id));
+      await Chain.write(CONFIG.CONTRACTS.vault, VAULT_ABI, "withdraw", [Number(id)]);
+      return { ok: true, amount: d ? d.amount + d.earned : 0 };
+    },
+    async claimVault({ id }){ await Chain.write(CONFIG.CONTRACTS.vault, VAULT_ABI, "claim", [Number(id)]); return { ok: true }; },
+    async stake({ amount }){
+      const amt = Chain.wei(amount);
+      if((await (await Chain.token(CONFIG.CONTRACTS.token)).balanceOf(wallet.address)) < amt) throw new Error("Not enough $" + CONFIG.TOKEN);
+      await Chain.ensureAllowance(CONFIG.CONTRACTS.token, amt, CONFIG.CONTRACTS.staking);
+      await Chain.write(CONFIG.CONTRACTS.staking, STAKE_ABI, "stake", [amt]);
+      return { ok: true };
+    },
+    async unstake({ amount }){ await Chain.write(CONFIG.CONTRACTS.staking, STAKE_ABI, "unstake", [Chain.wei(amount)]); return { ok: true }; },
+    async claimStakeFees(){ await Chain.write(CONFIG.CONTRACTS.staking, STAKE_ABI, "claimFees", []); return { ok: true }; },
     async getLeaderboard(by = "profit"){
       const h = await Chain.history(), users = {}, cost = {}, outcome = {};
       h.events.forEach(e => {

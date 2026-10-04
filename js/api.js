@@ -101,7 +101,7 @@ const Engine = {
   },
   // quote a buy: margin * lev worth of shares, fee taken from the size
   quote(m, u, side, margin, lev, ref){
-    const size = margin * lev, rate = Engine.feeRate(u, ref), fee = size * rate;
+    const size = margin * lev, rate = u.feeRate ?? Engine.feeRate(u, ref), fee = size * rate;
     const shares = LMSR.sharesFor(m, side, size - fee);
     const after = LMSR.apply(m, side, shares);
     const borrowed = size - margin;
@@ -196,8 +196,8 @@ const Engine = {
     const parts = { Trading: u.points.trade, Vault: vault, Staking: stake, Referrals: refs, Badges: badges, Bonus: u.points.bonus };
     return { parts, total: Object.values(parts).reduce((a, b) => a + b, 0) };
   },
-  badges(u){
-    const created = Object.keys(u.bonds).length;
+  badges(u, hasCode = !!store.get("affCode:" + (wallet.address || "").toLowerCase(), null)){
+    const created = Object.keys(u.bonds || {}).length;
     return [
       { ico: "🎯", name: "First call", desc: "Place your first trade", got: u.trades >= 1 },
       { ico: "🔥", name: "On a roll", desc: "Place 10 trades", got: u.trades >= 10 },
@@ -207,8 +207,8 @@ const Engine = {
       { ico: "🏗", name: "Market maker", desc: "Create a market", got: created >= 1 },
       { ico: "🏦", name: "Liquidity provider", desc: "Deposit into the vault", got: u.deposits.length >= 1 },
       { ico: "💎", name: "Diamond hands", desc: "Lock in the vault for 365 days", got: u.deposits.some(d => d.lock === "d365") },
-      { ico: "🛡", name: "Guardian", desc: "Stake and vote on a resolution", got: Object.keys(u.votes).length >= 1 },
-      { ico: "🤝", name: "Connector", desc: "Create your referral link", got: !!store.get("affCode:" + (wallet.address || "").toLowerCase(), null) }
+      { ico: "🛡", name: "Guardian", desc: "Stake and vote on a resolution", got: Object.keys(u.votes || {}).length >= 1 },
+      { ico: "🤝", name: "Connector", desc: "Create your referral link", got: hasCode }
     ];
   }
 };

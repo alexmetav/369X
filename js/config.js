@@ -10,6 +10,12 @@ const CONFIG = {
   USE_MOCK: true,
   API_BASE: "",                     // e.g. "https://api.369x.io"
 
+  // ---- live backend (Supabase) -------------------------------------
+  // Fill these in and set USE_MOCK to false to use the shared database.
+  // The key is the PUBLISHABLE key (safe to put in the website).
+  SUPABASE_URL: "",
+  SUPABASE_KEY: "",
+
   // ---- brand ---------------------------------------------------------
   SITE_NAME: "369X",
   SITE_URL: "https://369x.io",      // used in referral links

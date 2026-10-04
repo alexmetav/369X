@@ -80,7 +80,9 @@ function captureRef(){
   if(ref && !refBy()){ store.set("refBy", ref); api.trackClick(ref); }
   const by = refBy();
   $("#refBanner").innerHTML = by ? `<div class="ref-banner"><div class="wrap"><span class="addr-dot"></span><span>Invited by <b>${esc(by)}</b>. You pay ${pct(CONFIG.REF_DISCOUNT)} less in trading fees.</span></div></div>` : "";
-  $("#demoBanner").innerHTML = CONFIG.USE_MOCK ? `<div class="demo-banner"><div class="wrap"><b>Testnet demo</b><span>Prices, balances and payouts use test money and are saved only in this browser.</span><button data-act="resetDemo">Reset demo</button></div></div>` : "";
+  $("#demoBanner").innerHTML = CONFIG.USE_MOCK
+    ? `<div class="demo-banner"><div class="wrap"><b>Testnet demo</b><span>Prices, balances and payouts use test money and are saved only in this browser.</span><button data-act="resetDemo">Reset demo</button></div></div>`
+    : `<div class="demo-banner"><div class="wrap"><b>Testnet</b><span>Balances are free test money with no real value. Get some from the faucet in the wallet menu.</span></div></div>`;
 }
 
 /* =====================================================================
@@ -233,7 +235,7 @@ function resolveBox(m){
     <div class="bar" style="margin-top:16px"><i style="width:${(m.votes.YES / tot * 100).toFixed(1)}%"></i></div>
     <div class="mfoot"><span class="num">YES ${compactN(m.votes.YES)} (${pct(m.votes.YES / tot)})</span><span class="num">NO ${compactN(m.votes.NO)}</span></div>
     ${myVote ? `<div class="info">You voted <b>${esc(myVote.side)}</b> with ${tok(myVote.weight)}.</div>` : `<div class="yn"><button class="yes" data-act="vote" data-id="${esc(m.id)}" data-side="YES"><span>Vote YES</span></button><button class="no" data-act="vote" data-id="${esc(m.id)}" data-side="NO"><span>Vote NO</span></button></div>`}
-    ${CONFIG.USE_MOCK ? `<button class="btn btn-ghost" style="width:100%;margin-top:12px" data-act="finalize" data-id="${esc(m.id)}">Finalize now (demo)</button>` : ""}
+    <button class="btn btn-ghost" style="width:100%;margin-top:12px" data-act="finalize" data-id="${esc(m.id)}">${CONFIG.USE_MOCK ? "Finalize now (demo)" : "Finalize result"}</button>
   </div>`;
 }
 
@@ -484,7 +486,7 @@ async function pageAffiliate(){
   const next = CONFIG.REF_TIERS[CONFIG.REF_TIERS.indexOf(tier) + 1];
   const prog = next ? Math.min(100, (a.stats.volume - tier.min) / (next.min - tier.min) * 100) : 100;
   const link = a.code ? `${CONFIG.SITE_URL}/?ref=${a.code}` : "";
-  const max = Math.max(...a.earnings);
+  const max = Math.max(0.01, ...a.earnings);
   const days = a.earnings.map((_, i) => { const d = new Date(); d.setDate(d.getDate() - (a.earnings.length - 1 - i)); return d.getDate(); });
   const msg = `I'm calling outcomes on ${CONFIG.SITE_NAME}. Join with my link and pay ${pct(CONFIG.REF_DISCOUNT)} less in fees: `;
   return `<section class="page-head"><div class="wrap">
@@ -629,7 +631,7 @@ function afterRender(r){
   }
   if(r === "market" && tState.m){
     renderTrade();
-    if(CONFIG.USE_MOCK) pollT = setInterval(refreshMarket, 15000);
+    pollT = setInterval(refreshMarket, 15000);
   }
   if(r === "create"){ ["cq", "ccat", "cend", "cp"].forEach(id => $("#" + id)?.addEventListener("input", previewCreate)); if($("#cprev")) previewCreate(); }
   if(r === "vault" && $("#vamt")){ $("#vamt").addEventListener("input", updateVaultSum); updateVaultSum(); }
@@ -661,7 +663,8 @@ const ACTIONS = {
   async buy(el){
     if(tState.margin < 1) return toast("Enter at least $1", true);
     await busy(el, "Placing order…", async () => {
-      await api.placeTrade({ marketId: tState.m.id, side: tState.side, margin: tState.margin, lev: tState.lev, wallet: wallet.address, ref: refBy() });
+      const q = Engine.quote(tState.m, ACC || Engine.blankUser(), tState.side, tState.margin, tState.lev, refBy());
+      await api.placeTrade({ marketId: tState.m.id, side: tState.side, margin: tState.margin, lev: tState.lev, wallet: wallet.address, ref: refBy(), minShares: q.shares * 0.97 });
       toast(`Bought ${tState.side}${tState.lev > 1 ? " at " + tState.lev + "×" : ""}`);
       await refreshAccount(); route(true);
     });

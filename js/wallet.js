@@ -14,6 +14,10 @@ const wallet = {
 
   async connect(){
     const eth = this.provider();
+    if(!eth && backend.live){
+      toast("Install MetaMask or open this site in your wallet app's browser", true);
+      return;
+    }
     if(!eth){
       store.set("wallet", { address: randAddr(), kind: "demo" });
       toast("No wallet app found, using a demo wallet");
@@ -21,12 +25,14 @@ const wallet = {
     }
     try{
       const [addr] = await eth.request({ method: "eth_requestAccounts" });
-      store.set("wallet", { address: addr, kind: "injected" });
       this.chainId = await eth.request({ method: "eth_chainId" });
       if(this.wrongChain) await this.switchChain();
+      if(backend.live){ toast("Check your wallet to sign in (free)"); await backend.login(addr); }
+      store.set("wallet", { address: addr, kind: "injected" });
       toast("Wallet connected");
       this.changed();
     }catch(e){
+      store.set("wallet", null);
       toast(e.code === 4001 ? "Connection cancelled" : (e.message || "Could not connect"), true);
     }
   },
@@ -43,21 +49,25 @@ const wallet = {
     this.chainId = await eth.request({ method: "eth_chainId" }).catch(() => this.chainId);
     this.changed();
   },
-  disconnect(){ store.set("wallet", null); toast("Wallet disconnected"); this.changed(); },
+  disconnect(){ store.set("wallet", null); if(backend.live) backend.logout(); toast("Wallet disconnected"); this.changed(); },
   changed(){ if(typeof onWalletChange === "function") onWalletChange(); },
 
   // restore a previous session silently and follow account / network changes
   async init(){
+    if(backend.live && this.kind === "demo") store.set("wallet", null);   // demo wallets can't sign in to the live backend
     const eth = this.provider(); if(!eth) return;
     try{
       this.chainId = await eth.request({ method: "eth_chainId" });
       if(this.kind === "injected"){
         const [addr] = await eth.request({ method: "eth_accounts" });
-        if(addr) store.set("wallet", { address: addr, kind: "injected" }); else store.set("wallet", null);
+        // in live mode the database session must belong to the same wallet
+        const ok = addr && (!backend.live || (await backend.sessionAddress()) === addr.toLowerCase());
+        if(ok) store.set("wallet", { address: addr, kind: "injected" }); else store.set("wallet", null);
       }
     }catch(e){}
     eth.on?.("accountsChanged", (accs) => {
       if(this.kind !== "injected") return;
+      if(backend.live){ backend.logout(); store.set("wallet", null); toast("Wallet account changed. Connect again to sign in."); return this.changed(); }
       store.set("wallet", accs[0] ? { address: accs[0], kind: "injected" } : null); this.changed();
     });
     eth.on?.("chainChanged", (id) => { this.chainId = id; this.changed(); });

@@ -74,7 +74,7 @@ function renderNav(){
       </div></details>`;
 }
 async function refreshAccount(){ ACC = wallet.address ? await api.getAccount(wallet.address).catch(() => null) : null; renderNav(); }
-async function onWalletChange(){ await refreshAccount(); route(); }
+async function onWalletChange(){ await refreshAccount(); if(CHAIN_ON && CONFIG.CONTRACTS.referral) inviteBanner(); route(); }
 
 function captureRef(){
   const read = (s) => { const m = s.match(/[?&]ref=([A-Za-z0-9_-]{2,24})/); return m ? m[1] : null; };
@@ -82,6 +82,7 @@ function captureRef(){
   if(ref && !refBy()){ store.set("refBy", ref); api.trackClick(ref); }
   const by = refBy();
   $("#refBanner").innerHTML = by ? `<div class="ref-banner"><div class="wrap"><span class="addr-dot"></span><span>Invited by <b>${esc(by)}</b>. You pay ${pct(CONFIG.REF_DISCOUNT)} less in trading fees.</span></div></div>` : "";
+  if(CHAIN_ON && CONFIG.CONTRACTS.referral) inviteBanner();
   $("#demoBanner").innerHTML = CONFIG.USE_MOCK
     ? `<div class="demo-banner"><div class="wrap"><b>Testnet demo</b><span>Prices, balances and payouts use test money and are saved only in this browser.</span><button data-act="resetDemo">Reset demo</button></div></div>`
     : CHAIN_ON
@@ -99,6 +100,18 @@ function chainSoon(title, text){
   </div></section>`;
 }
 
+// on-chain invites: the invited user accepts once (one transaction) to link to their referrer
+async function inviteBanner(){
+  const by = refBy(), el = $("#refBanner"); if(!by){ el.innerHTML = ""; return; }
+  const box = (inner) => `<div class="ref-banner"><div class="wrap"><span class="addr-dot"></span>${inner}</div></div>`;
+  if(!wallet.address){ el.innerHTML = box(`<span>Invited by <b>${esc(by)}</b>. Connect your wallet and accept to get ${pct(CONFIG.REF_DISCOUNT)} of your trading fees back.</span>`); return; }
+  try{
+    const st = await api.inviteStatus(wallet.address, by.toLowerCase());
+    if(!st || !st.valid || st.accepted){ el.innerHTML = st?.accepted ? "" : ""; return; }
+    el.innerHTML = box(`<span>Invited by <b>${esc(by)}</b>. Accept to get ${pct(CONFIG.REF_DISCOUNT)} of your trading fees back.</span><button class="btn btn-grad btn-sm" style="margin-left:auto" data-act="acceptInvite">Accept invite</button>`);
+  }catch(e){ el.innerHTML = ""; }
+}
+
 /* =====================================================================
    PAGES
    ===================================================================== */
@@ -106,7 +119,7 @@ async function pageHome(){
   const all = await api.getMarkets({ status: "all" }), live = all.filter(m => m.status === "live");
   const trending = await api.getMarkets({ sort: "trending" });
   const f = [...live].sort((a, b) => b.vol - a.vol)[0] || all[0];
-  const vault = await api.getVault();
+  const vault = await api.getVault().catch(() => ({ tvl: 0 }));   // one failed read shouldn't break the home page
   return `
   <section class="hero"><div class="wrap hero-grid">
     <div>
@@ -562,9 +575,9 @@ async function pageLeaderboard(){
 
 /* ---------- affiliate ---------- */
 async function pageAffiliate(){
-  if(CHAIN_ON) return chainSoon("Affiliate program", "Referral rewards are being moved on-chain. You'll earn up to 35% of the fees from everyone you invite, paid in test USDT.");
+  if(CHAIN_ON && !CONFIG.CONTRACTS.referral) return chainSoon("Affiliate program", "Referral rewards are being moved on-chain. You'll earn up to 35% of the fees from everyone you invite, paid in test USDT.");
   if(!wallet.address) return `<section class="page-head"><div class="wrap">
-    ${head("Affiliate program", `Earn up to 35% of the trading fees from everyone you invite. Your referrals get ${pct(CONFIG.REF_DISCOUNT)} off their fees.`)}
+    ${head("Affiliate program", `Earn up to 35% of the trading fees from everyone you invite. Your referrals get ${pct(CONFIG.REF_DISCOUNT)} ${CHAIN_ON ? "of their fees back" : "off their fees"}.`)}
     <div class="panel aff-tease"><div><h3 class="h3">Connect a wallet to get your link</h3><p class="muted" style="margin-top:6px">Your earnings are tied to your wallet address and paid out in ${S()}.</p><div class="hero-cta"><button class="btn btn-grad" data-act="connect">Connect wallet</button></div></div><div class="tiers">${tierRows(null)}</div></div></div></section>`;
   const a = await api.getAffiliate(wallet.address);
   let tier = CONFIG.REF_TIERS[0]; CONFIG.REF_TIERS.forEach(t => { if(a.stats.volume >= t.min) tier = t; });
@@ -578,7 +591,7 @@ async function pageAffiliate(){
   return `<section class="page-head"><div class="wrap">
     ${head("Affiliate dashboard", `You're on the <b style="color:var(--text)">${tier.name}</b> tier, earning ${pct(tier.rate)} of fees from direct referrals and 5% from theirs.`)}
     <div class="stat-grid">
-      <div class="panel stat"><small>Link clicks</small><b class="num">${num(a.stats.clicks)}</b></div>
+      ${a.stats.clicks == null ? `<div class="panel stat"><small>Waiting to be published</small><b class="num">${money(a.stats.unpublished, 2)}</b><em>${a.stats.rebates > 0 ? "incl. " + money(a.stats.rebates, 2) + " fee rebates" : ""}</em></div>` : `<div class="panel stat"><small>Link clicks</small><b class="num">${num(a.stats.clicks)}</b></div>`}
       <div class="panel stat"><small>Referred traders</small><b class="num">${a.stats.signups}</b></div>
       <div class="panel stat"><small>Referred volume</small><b class="num">${money(a.stats.volume)}</b></div>
       <div class="panel stat"><small>Total earned</small><b class="num">${money(a.stats.earned, 2)}</b></div>
@@ -592,14 +605,16 @@ async function pageAffiliate(){
             <a class="btn btn-ghost btn-sm" target="_blank" rel="noopener" href="https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent("Trade predictions on " + CONFIG.SITE_NAME)}">Share on Telegram</a>
             <a class="btn btn-ghost btn-sm" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(msg + link)}">Share on WhatsApp</a>
           </div>` : `<p class="muted" style="margin-top:6px">Pick a short code. It becomes your link, like ${esc(site.replace(/^https?:\/\//, ""))}/?ref=yourname</p>`}
-        <div class="field"><label for="code">${a.code ? "Change your code" : "Referral code"}</label>
+        ${CHAIN_ON && a.code ? `<p class="side-note">Your code is saved on-chain and is permanent.</p>` : `<div class="field"><label for="code">${a.code ? "Change your code" : "Referral code"}</label>
           <div class="field-row"><input class="input" id="code" maxlength="20" placeholder="yourname" value="${esc(a.code || "")}" autocomplete="off"><button class="btn btn-ghost" data-act="saveCode">${a.code ? "Update" : "Create link"}</button></div>
-          <small id="codeErr" class="err"></small></div>
+          <small id="codeErr" class="err"></small>${CHAIN_ON ? `<small class="muted" style="font-size:12px">Lowercase letters, numbers, - or _. Saved on-chain, can't be changed later.</small>` : ""}</div>`}
+        ${a.referrer ? `<p class="side-note">You were invited by <span class="num">${esc(short(a.referrer))}</span> and get ${pct(CONFIG.REF_DISCOUNT)} of your fees back.</p>` : ""}
       </div>
       <div class="panel pad">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><h2 class="h3">Ready to claim</h2><span class="tag cy">${S()}</span></div>
         <b style="display:block;font-family:var(--display);font-weight:500;font-size:clamp(30px,3.4vw,42px);margin-top:10px" class="num">${money(a.stats.claimable, 2)}</b>
         <button class="btn btn-grad" style="width:100%;margin-top:16px;${a.stats.claimable <= 0 ? "opacity:.45;cursor:not-allowed" : ""}" data-act="claimRef" ${a.stats.claimable <= 0 ? "disabled" : ""}>Claim earnings</button>
+        ${a.stats.clicks == null ? `<p class="side-note">Earnings build up live from your invitees' trades. The 369X team publishes them on-chain regularly, then you can claim.</p>` : ""}
         <div style="margin-top:22px"><div style="display:flex;justify-content:space-between;font-size:13px"><span class="muted">${next ? `Progress to ${next.name} (${pct(next.rate)})` : "Top tier reached"}</span><span class="num muted">${next ? money(a.stats.volume) + " / " + compact(next.min) : ""}</span></div><div class="progress"><i style="width:${prog}%"></i></div></div>
       </div>
     </div>
@@ -609,6 +624,11 @@ async function pageAffiliate(){
         <div class="bars-x">${days.map(d => `<span>${d}</span>`).join("")}</div></div>
       <div class="panel pad"><h2 class="h3">Commission tiers</h2><p class="muted">Based on total referred volume</p><div class="tiers" style="margin-top:14px">${tierRows(a.stats.volume)}</div></div>
     </div>
+    ${a.admin ? `<div class="panel pad" style="margin-top:16px;border-color:rgba(95,214,242,.35)"><h2 class="h3">Admin: referral rewards</h2>
+      <div class="kv4"><div><small>Reward pool</small><b class="num">${money(a.admin.pool, 2)}</b></div><div><small>Earned by everyone (live)</small><b class="num">${money(a.admin.totalLive, 2)}</b></div>
+        <div><small>Published so far</small><b class="num">${money(a.admin.published, 2)}</b></div><div><small>Claimed</small><b class="num">${money(a.admin.claimedAll, 2)}</b></div></div>
+      <p class="side-note">${a.admin.totalLive > a.admin.published + 0.000001 ? money(a.admin.totalLive - a.admin.published, 2) + " is waiting to be published." : "Everything earned so far is published."} Publishing tops up the pool automatically if it's too low.</p>
+      <div class="hero-cta" style="margin-top:12px"><button class="btn btn-grad" data-act="publishRewards">Publish rewards now</button><button class="btn btn-ghost" data-act="fundRefPool">Add 100,000 to the pool</button></div></div>` : ""}
     <div class="panel" style="margin-top:16px"><div class="pad" style="padding-bottom:0"><h2 class="h3">Your referrals</h2></div>
       <div class="scroll-x"><table class="table" style="margin-top:8px"><thead><tr><th>Wallet</th><th>Level</th><th>Joined</th><th class="r">Volume</th><th class="r">You earned</th></tr></thead>
         <tbody>${a.referrals.map(r => `<tr><td class="num">${esc(r.addr)}</td><td><span class="tag ${r.tier === 1 ? "ok" : ""}">${r.tier === 1 ? "Direct" : "Level 2"}</span></td><td>${fmtDate(r.joined)}</td><td class="r num">${money(r.volume)}</td><td class="r num pos">+${money(r.earned, 2)}</td></tr>`).join("")}</tbody></table></div></div>
@@ -887,6 +907,15 @@ const ACTIONS = {
     if(!/^[a-z0-9_-]{3,20}$/.test(v)) return err.textContent = "Use 3 to 20 letters, numbers, dashes or underscores.";
     try{ await api.setAffiliateCode(wallet.address, v); toast("Referral link saved"); route(true); }catch(e){ err.textContent = e.message; }
   },
+  async acceptInvite(el){
+    await busy(el, "Accepting…", async () => { await api.acceptInvite(refBy().toLowerCase()); toast("Invite accepted. You now get fees back on every trade."); inviteBanner(); route(true); });
+  },
+  async publishRewards(el){
+    await busy(el, "Publishing…", async () => { const r = await api.publishReferralRewards(); toast(`Published ${money(r.total, 2)} for ${r.people} people`); route(true); });
+  },
+  async fundRefPool(el){
+    await busy(el, "Sending…", async () => { await api.fundReferralPool(100000); toast("Added 100,000 to the reward pool"); route(true); });
+  },
   async claimRef(el){
     await busy(el, "Claiming…", async () => { const r = await api.claimAffiliate(wallet.address); toast("Claimed " + money(r.amount, 2)); await refreshAccount(); route(true); });
   }
@@ -905,5 +934,6 @@ window.addEventListener("hashchange", () => route());
   captureRef();
   await wallet.init();
   await refreshAccount();
+  if(CHAIN_ON && CONFIG.CONTRACTS.referral) inviteBanner();
   route();
 })();

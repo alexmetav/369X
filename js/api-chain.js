@@ -65,7 +65,23 @@ const STAKE_ABI = [
   "function tallies(uint256) view returns (uint256 yes, uint256 no, bool finalized, bool outcomeYes)",
   "function voteOf(uint256,address) view returns (tuple(bool voted,bool yes,bool claimed,uint256 weight))"
 ];
-const HAS_VAULT = () => !!CONFIG.CONTRACTS?.vault, HAS_STAKING = () => !!CONFIG.CONTRACTS?.staking;
+const REFERRAL_ABI = [
+  "function registerCode(string)",
+  "function setReferrer(string)",
+  "function claim(uint256,bytes32[]) returns (uint256)",
+  "function publish(bytes32,uint64,uint256)",
+  "function codeOf(address) view returns (string)",
+  "function referrerOf(address) view returns (address)",
+  "function ownerOfCode(string) view returns (address)",
+  "function claimed(address) view returns (uint256)",
+  "function snapshotBlock() view returns (uint64)",
+  "function totalPublished() view returns (uint256)",
+  "function totalClaimed() view returns (uint256)",
+  "function pool() view returns (uint256)",
+  "event CodeRegistered(address indexed user, string code)",
+  "event ReferrerSet(address indexed user, address indexed referrer, string code)"
+];
+const HAS_VAULT = () => !!CONFIG.CONTRACTS?.vault, HAS_STAKING = () => !!CONFIG.CONTRACTS?.staking, HAS_REFERRAL = () => !!CONFIG.CONTRACTS?.referral;
 const LOCK_IDS = ["flex", "d90", "d180", "d365"];
 
 const Chain = {
@@ -91,6 +107,36 @@ const Chain = {
   async vault(){ return new ethers.Contract(CONFIG.CONTRACTS.vault, VAULT_ABI, await Chain.readProvider()); },
   async staking(){ return new ethers.Contract(CONFIG.CONTRACTS.staking, STAKE_ABI, await Chain.readProvider()); },
   votingPeriod: null,
+  async referral(){ return new ethers.Contract(CONFIG.CONTRACTS.referral, REFERRAL_ABI, await Chain.readProvider()); },
+
+  // raw trades + invites (exact wei values) for the referral formula, cached and scanned in chunks
+  async referralEvents(){
+    if(Chain.raw && Date.now() - Chain.raw.at < 15000) return Chain.raw;
+    const p = await Chain.readProvider(), C = CONFIG.CONTRACTS;
+    const mi = new ethers.Interface(MARKET_ABI), ri = new ethers.Interface(REFERRAL_ABI);
+    const key = "chain:refraw1:" + C.market + ":" + C.referral;
+    const cache = store.get(key, null) || { from: await Chain.deployBlock(p), ev: [] };
+    const latest = await p.getBlockNumber(), STEP = 5000, ranges = [];
+    for(let b = cache.from; b <= latest; b += STEP) ranges.push([b, Math.min(latest, b + STEP - 1)]);
+    for(let i = 0; i < ranges.length; i += 4){
+      const got = await Promise.all(ranges.slice(i, i + 4).map(([f, t]) => p.getLogs({ address: [C.market, C.referral], fromBlock: f, toBlock: t })));
+      got.flat().forEach(l => {
+        const isRef = l.address.toLowerCase() === C.referral.toLowerCase();
+        let ev = null; try{ ev = (isRef ? ri : mi).parseLog(l); }catch(e){}
+        if(!ev) return;
+        if(ev.name === "Trade") cache.ev.push({ k: "t", b: l.blockNumber, i: l.index, u: ev.args.user, f: ev.args.fee.toString(), a: ev.args.amount.toString() });
+        else if(ev.name === "ReferrerSet") cache.ev.push({ k: "r", b: l.blockNumber, i: l.index, u: ev.args.user, r: ev.args.referrer });
+      });
+    }
+    cache.from = latest + 1; store.set(key, cache);
+    const [bl, b0] = await Promise.all([p.getBlock(latest), p.getBlock(Math.max(0, latest - 2000))]);
+    const spb = (bl.timestamp - b0.timestamp) / Math.max(1, latest - Math.max(0, latest - 2000));
+    const ts = (bk) => (bl.timestamp - (latest - bk) * spb) * 1000;
+    const events = cache.ev.map(e => e.k === "t"
+      ? { kind: "trade", block: e.b, logIndex: e.i, user: e.u, fee: BigInt(e.f), amount: BigInt(e.a), ts: ts(e.b) }
+      : { kind: "ref", block: e.b, logIndex: e.i, user: e.u, referrer: e.r, ts: ts(e.b) });
+    return (Chain.raw = { events, latest, at: Date.now() });
+  },
 
   // signer from the picked wallet (MetaMask first), on the right network
   async signer(){
@@ -381,6 +427,70 @@ if(CHAIN_ON){
       return { ok: true };
     },
     async unstake({ amount }){ await Chain.write(CONFIG.CONTRACTS.staking, STAKE_ABI, "unstake", [Chain.wei(amount)]); return { ok: true }; },
+    async getAffiliate(w){
+      const me = w.toLowerCase(), rf = await Chain.referral();
+      const [code, referrer, claimedW, snap, published, pool] = await Promise.all([rf.codeOf(w), rf.referrerOf(w), rf.claimed(w), rf.snapshotBlock(), rf.totalPublished(), rf.pool()]);
+      const { events, latest } = await Chain.referralEvents();
+      const live = Referral.compute(events, CONFIG);
+      // what's claimable now = my amount in the published tree minus what I already claimed
+      let publishedMine = 0n;
+      if(Number(snap) > 0){ const pub = Referral.compute(events.filter(e => e.block <= Number(snap)), CONFIG); publishedMine = pub.owed.get(me) || 0n; }
+      const rows = [...(live.referrals.get(me) || new Map()).entries()].map(([u, r]) => ({ addr: short(u), joined: new Date(r.ts || Date.now()).toISOString().slice(0, 10), volume: Chain.fmt(r.volume), earned: Chain.fmt(r.earned), tier: 1 }));
+      const d = live.daily.get(me) || new Map();
+      const earnings = [...Array(14).keys()].map(i => { const day = new Date(Chain.now() - (13 - i) * 864e5).toISOString().slice(0, 10); return Chain.fmt(d.get(day) || 0n); });
+      const earned = live.owed.get(me) || 0n;
+      const out = { code: code || null, referrer: referrer === ethers.ZeroAddress ? null : referrer, referrals: rows, earnings,
+        stats: { clicks: null, signups: rows.length, volume: Chain.fmt(live.refVolume.get(me) || 0n), earned: Chain.fmt(earned),
+          claimable: Chain.fmt(publishedMine > claimedW ? publishedMine - claimedW : 0n), unpublished: Chain.fmt(earned > publishedMine ? earned - publishedMine : 0n),
+          rebates: Chain.fmt(live.rebates.get(me) || 0n), level2: Chain.fmt(live.l2.get(me) || 0n) } };
+      if(ACC?.isAdmin){
+        const total = [...live.owed.values()].reduce((s, v) => s + v, 0n);
+        out.admin = { pool: Chain.fmt(pool), totalLive: Chain.fmt(total), published: Chain.fmt(published), snap: Number(snap), latest, claimedAll: Chain.fmt(await rf.totalClaimed()) };
+      }
+      return out;
+    },
+    async setAffiliateCode(w, code){ await Chain.write(CONFIG.CONTRACTS.referral, REFERRAL_ABI, "registerCode", [code]); return { ok: true, code }; },
+    async acceptInvite(code){
+      const rf = await Chain.referral(), owner = await rf.ownerOfCode(code);
+      if(owner === ethers.ZeroAddress) throw new Error("This invite code doesn't exist");
+      await Chain.write(CONFIG.CONTRACTS.referral, REFERRAL_ABI, "setReferrer", [code]);
+      return { ok: true };
+    },
+    async inviteStatus(w, code){
+      if(!code || !w) return null;
+      const rf = await Chain.referral();
+      const [owner, referrer] = await Promise.all([rf.ownerOfCode(code), rf.referrerOf(w)]);
+      return { valid: owner !== ethers.ZeroAddress && owner.toLowerCase() !== w.toLowerCase(), accepted: referrer !== ethers.ZeroAddress, owner };
+    },
+    async claimAffiliate(w){
+      const rf = await Chain.referral(), snap = Number(await rf.snapshotBlock());
+      if(!snap) throw new Error("No rewards have been published yet");
+      const { events } = await Chain.referralEvents();
+      const t = Referral.tree(Referral.compute(events.filter(e => e.block <= snap), CONFIG).owed), me = w.toLowerCase();
+      const amt = t.amounts.get(me); if(!amt) throw new Error("Nothing to claim yet");
+      const before = await rf.claimed(w);
+      await Chain.write(CONFIG.CONTRACTS.referral, REFERRAL_ABI, "claim", [amt, t.proofs.get(me)]);
+      return { ok: true, amount: Chain.fmt(amt - before) };
+    },
+    // admin: publish everyone's rewards up to the latest block; tops up the pool first if needed
+    async publishReferralRewards(){
+      Chain.raw = null;                                   // always publish from fresh data
+      const rf = await Chain.referral(), { events, latest } = await Chain.referralEvents(), snap = latest;
+      const t = Referral.tree(Referral.compute(events.filter(e => e.block <= snap), CONFIG).owed);
+      const [pool, claimedAll] = await Promise.all([rf.pool(), rf.totalClaimed()]);
+      if(pool + claimedAll < t.total){
+        const need = t.total - pool - claimedAll + ethers.parseEther("1000");
+        toast("Topping up the reward pool first");
+        await Chain.write(CONFIG.CONTRACTS.usdt, TOKEN_ABI.concat(["function transfer(address,uint256) returns (bool)"]), "transfer", [CONFIG.CONTRACTS.referral, need]);
+      }
+      await Chain.write(CONFIG.CONTRACTS.referral, REFERRAL_ABI, "publish", [t.root, snap, t.total]);
+      return { ok: true, total: Chain.fmt(t.total), people: t.amounts.size };
+    },
+    async fundReferralPool(amount){
+      await Chain.write(CONFIG.CONTRACTS.usdt, TOKEN_ABI.concat(["function transfer(address,uint256) returns (bool)"]), "transfer", [CONFIG.CONTRACTS.referral, Chain.wei(amount)]);
+      return { ok: true };
+    },
+    async trackClick(){},
     async claimStakeFees(){ await Chain.write(CONFIG.CONTRACTS.staking, STAKE_ABI, "claimFees", []); return { ok: true }; },
     async getLeaderboard(by = "profit"){
       const h = await Chain.history(), users = {}, cost = {}, outcome = {};

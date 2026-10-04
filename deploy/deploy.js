@@ -24,14 +24,16 @@
 
   const RESERVE = 1_000_000;
   const C = CONFIG.CONTRACTS || {};
-  const PHASE2 = !!C.market;                 // core contracts exist: this page now adds the vault + staking
+  const PHASE2 = !!C.market && !(C.vault && C.staking);   // core contracts exist: add the vault + staking
+  const PHASE3 = !!(C.vault && C.staking) && !C.referral;  // then: add the referral program
+  const REF_POOL = 100_000;
   const REWARD_POOL = 1_000_000;
 
   function toast(msg, bad){
     const t = $("#toast"); t.textContent = msg; t.style.color = bad ? "var(--no)" : "";
     t.classList.add("show"); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("show"), 3500);
   }
-  const key = () => `369x:deploy${PHASE2 ? "2" : ""}:${chainId}:${me}`;
+  const key = () => `369x:deploy${PHASE3 ? "3" : PHASE2 ? "2" : ""}:${chainId}:${me}`;
   const load = () => { try{ return JSON.parse(localStorage.getItem(key())) || { done: {} }; }catch(e){ return { done: {} }; } };
   const save = (s) => { try{ localStorage.setItem(key(), JSON.stringify(s)); }catch(e){} };
 
@@ -62,7 +64,14 @@
     ];
   }
 
+  function steps3(){
+    return [
+      { id: "referral", label: "Create the referral contract", run: async (s) => { const r = await deployContract("Referral369X", [C.usdt, C.market]); s.referral = r.address; return r; } },
+      { id: "pool", label: `Fund the referral reward pool (${REF_POOL.toLocaleString()} tUSDT)`, run: async (s) => send(token(C.usdt), "transfer", [s.referral, E(REF_POOL)]) }
+    ];
+  }
   function steps(seed){
+    if(PHASE3) return steps3();
     if(PHASE2) return steps2();
     const list = [
       { id: "usdt", label: "Create test USDT token (faucet: 1,000 a day)", run: async (s) => { const r = await deployContract("TestToken", ["369X Test USDT", "tUSDT", E(1000), E(10_000_000)]); s.usdt = r.address; return r; } },
@@ -88,6 +97,11 @@
     const all = list.every(st => state.done[st.id]);
     $("#reset").hidden = all;                 // nothing to restart once everything is deployed
     $("#go").hidden = all;
+    if(PHASE3){
+      $("#resultBox").hidden = !state.referral;
+      if(state.referral) $("#result").textContent = JSON.stringify({ network: CONFIG.CHAIN.chainName, chainId: Number(chainId), referral: state.referral, complete: all }, null, 2);
+      return;
+    }
     if(PHASE2){
       $("#resultBox").hidden = !state.vault;
       if(state.vault) $("#result").textContent = JSON.stringify({ network: CONFIG.CHAIN.chainName, chainId: Number(chainId), vault: state.vault, staking: state.staking || null, complete: all }, null, 2);
@@ -119,7 +133,7 @@
     const bal = Number(ethers.formatEther(await provider.getBalance(me)));
     $("#who").innerHTML = `Connected with <b>${walletName}</b>: <b>${me.slice(0, 6)}…${me.slice(-4)}</b> on ${CONFIG.CHAIN.chainName} · Balance <b>${bal.toFixed(4)} tBNB</b>` +
       (bal < 0.05 ? ` · <span style="color:var(--no)">You need about 0.05 tBNB. Use the faucet button.</span>` : "");
-    if(PHASE2 && me.toLowerCase() !== String(C.owner).toLowerCase())
+    if((PHASE2 || PHASE3) && me.toLowerCase() !== String(C.owner).toLowerCase())
       return toast(`Connect with the wallet that owns the market (${C.owner.slice(0, 6)}…${C.owner.slice(-4)}). Switch account in MetaMask.`, true);
     $("#go").disabled = false;
     render(load(), steps($("#seed").checked));
@@ -145,15 +159,20 @@
     toast("All done. Copy the addresses below and send them to Claude.");
   }
 
-  if(C.vault && C.staking){
+  if(C.vault && C.staking && C.referral){
     // everything is live: show the addresses, no deploy buttons
     document.querySelector("h1").textContent = "All 369X contracts are live";
     document.querySelector(".lede").innerHTML = "Nothing to deploy. These are the contracts your website uses on " + CONFIG.CHAIN.chainName + ".";
     document.querySelectorAll(".panel").forEach(el => el.hidden = true);
     const box = document.createElement("div"); box.className = "panel pad"; box.style.marginTop = "24px";
-    box.innerHTML = ["usdt", "token", "market", "vault", "staking"].map(k => `<div class="bal-row"><span>${k}</span><a style="color:var(--cyan)" target="_blank" rel="noopener" href="${explorer}/address/${C[k]}">${C[k]}</a></div>`).join("");
+    box.innerHTML = ["usdt", "token", "market", "vault", "staking", "referral"].map(k => `<div class="bal-row"><span>${k}</span><a style="color:var(--cyan)" target="_blank" rel="noopener" href="${explorer}/address/${C[k]}">${C[k]}</a></div>`).join("");
     document.querySelector("main").appendChild(box);
     return;
+  }
+  if(PHASE3){
+    document.querySelector("h1").textContent = "Add the referral program";
+    document.querySelector(".lede").innerHTML = "Adds the on-chain <b>referral</b> contract (codes, invites and reward claims) and funds its reward pool. 2 MetaMask confirmations, paid in free test BNB.";
+    $("#seed").closest("label").hidden = true;
   }
   if(PHASE2){
     document.querySelector("h1").textContent = "Add the vault and staking";

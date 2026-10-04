@@ -17,6 +17,7 @@ async function main(){
   const V = await ethers.getContractFactory("Vault369X"), S = await ethers.getContractFactory("Stake369X");
   const vault = await V.deploy(usdt, m), st = await S.deploy(tok, usdt, m);
   await vault.setStaking(st); await m.setFeeRecipient(vault); await m.setResolver(st); await tok.transfer(st, E(1_000_000));
-  console.log(JSON.stringify({ usdt: await usdt.getAddress(), token: await tok.getAddress(), market: await m.getAddress(), owner: owner.address, vault: await vault.getAddress(), staking: await st.getAddress() }));
+  const R = await ethers.getContractFactory("Referral369X"), ref = await R.deploy(usdt, m); await usdt.transfer(ref, E(100_000));
+  console.log(JSON.stringify({ usdt: await usdt.getAddress(), token: await tok.getAddress(), market: await m.getAddress(), owner: owner.address, vault: await vault.getAddress(), staking: await st.getAddress(), referral: await ref.getAddress() }));
 }
 main().catch(e => { console.error(e); process.exit(1); });

@@ -49,6 +49,7 @@ const VAULT_ABI = [
   "function pointsOf(address) view returns (uint256)",
   "function totalDeposits() view returns (uint256)",
   "function totalFeesToLps() view returns (uint256)",
+  "function totalFeesToStakers() view returns (uint256)",
   "function pendingFees() view returns (uint256)",
   "function lpShareBps() view returns (uint256)",
   "function startTime() view returns (uint256)",
@@ -247,9 +248,16 @@ const Chain = {
     if(!ranges.length) store.set(key, cache);
     // the newest few blocks are fetched fresh every time and never saved (they could still change)
     const tail = confirmed < latest ? (await getLogs(confirmed + 1, latest)).map(parse).filter(Boolean) : [];
+    // block -> time: exact at the first scanned block and at the latest one, linear in between
+    if(!cache.t0 || !Number.isInteger(cache.t0.b)){
+      const b0 = await Chain.retry(async () => (await Chain.readProvider()).getBlock(cache.ev.length ? Math.min(cache.ev[0].b, confirmed) : confirmed));
+      if(b0) cache.t0 = { b: b0.number, t: b0.timestamp };
+      store.set(key, cache);
+    }
     const back = Math.max(0, latest - 2000);
-    const [bl, b0] = await Chain.retry(async () => { const p = await Chain.readProvider(); return Promise.all([p.getBlock(latest), p.getBlock(back)]); });
-    const spb = (bl.timestamp - b0.timestamp) / Math.max(1, latest - back);
+    const [bl, bb] = await Chain.retry(async () => { const p = await Chain.readProvider(); return Promise.all([p.getBlock(latest), p.getBlock(back)]); });
+    const t0 = cache.t0 && cache.t0.b < latest ? cache.t0 : { b: back, t: bb.timestamp };
+    const spb = (bl.timestamp - t0.t) / Math.max(1, latest - t0.b);
     Chain.clock = { chain: bl.timestamp * 1000, local: Date.now() };     // markets end by blockchain time, not this computer's clock
     const ev = cache.ev.concat(tail).sort((x, y) => x.b - y.b || x.i - y.i);
     return { ev, confirmed, latest, ts: (bk) => (bl.timestamp - (latest - bk) * spb) * 1000, at: Date.now() };
@@ -665,6 +673,21 @@ if(CHAIN_ON){
       if(amt === 0n) throw new Error("No bonds to recover");
       await Chain.write(CONFIG.CONTRACTS.vault, VAULT_ABI, "sweepOther", [CONFIG.CONTRACTS.token, wallet.address, amt]);
       return { ok: true, amount: Chain.fmt(amt) };
+    },
+    // ---- owner analytics: every trade / market / invite event plus current totals ----
+    async getAnalytics(){
+      const C = CONFIG.CONTRACTS, [h, d, markets] = await Promise.all([Chain.history(), Chain.scan(), loadChainMarkets()]);
+      const mk = await Chain.market(), calls = [{ c: mk, fn: "reserve" }, { c: mk, fn: "protocolFees" }];
+      const v = HAS_VAULT() ? await Chain.vault() : null, st = HAS_STAKING() ? await Chain.staking() : null, rf = HAS_REFERRAL() ? await Chain.referral() : null;
+      if(v) calls.push({ c: v, fn: "totalDeposits" }, { c: v, fn: "totalFeesToLps" }, { c: v, fn: "totalFeesToStakers" });
+      if(st) calls.push({ c: st, fn: "totalStaked" });
+      if(rf) calls.push({ c: rf, fn: "totalPublished" }, { c: rf, fn: "totalClaimed" }, { c: rf, fn: "pool" });
+      const r = (await Chain.retry(() => Chain.multi(calls))).map(x => x === null ? null : Chain.fmt(x));
+      let i = 2; const t = { reserve: r[0], unharvested: r[1] };
+      if(v){ t.vaultTvl = r[i++]; t.feesToLps = r[i++]; t.feesToStakers = r[i++]; }
+      if(st) t.staked = r[i++];
+      if(rf){ t.refPublished = r[i++]; t.refClaimed = r[i++]; t.refPool = r[i++]; }
+      return { events: h.events, invites: d.ev.filter(e => e.k === "r").map(e => ({ ts: d.ts(e.b), u: e.u, r: e.r })), markets, totals: t, now: Chain.now() };
     },
     // ---- money left in the pre-v2 vault / staking contracts ----
     async getOld(w){

@@ -18,7 +18,7 @@ const CONFIG = {
 
   // ---- brand ---------------------------------------------------------
   SITE_NAME: "369X",
-  SITE_URL: "https://369x.io",      // used in referral links
+  SITE_URL: "https://369x.io",      // fallback for referral links (the live site uses its own address)
   TOKEN: "369X",                    // ticker of your token, shown as $369X
   STABLE: "USDT",                   // the stablecoin people trade with
   SOCIAL: {
@@ -43,8 +43,12 @@ const CONFIG = {
   REF_DISCOUNT: 0.10,               // invited users pay 10% less in fees
   MAINTENANCE: 0.05,                // leveraged position is liquidated when equity < 5% of size
 
-  // leverage unlocks by market volume: [maxLeverage, minVolume]
-  LEVERAGE_TIERS: [[2, 0], [3, 100000], [5, 250000], [10, 1000000]],
+  // ---- leverage (COMING SOON: switched off until launch) -------------
+  LEVERAGE_ENABLED: false,
+  // when it launches, leverage unlocks by market volume: [maxLeverage, minVolume]
+  LEVERAGE_TIERS: [[2, 25000], [3, 100000], [5, 250000], [10, 1000000]],
+  LEVERAGE_MIN: 50,                 // smallest leveraged position, in USDT
+  LEVERAGE_MAX: 2000,               // largest leveraged position, in USDT
 
   // ---- market creation -----------------------------------------------
   CREATE_BOND: 1000,                // $369X bond, returned when the market resolves cleanly

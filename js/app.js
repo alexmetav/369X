@@ -97,7 +97,7 @@ async function pageHome(){
   <section class="hero"><div class="wrap hero-grid">
     <div>
       <h1><span id="scr1">Predict.</span><span id="scr2">Participate.</span><span class="g">Prosper.</span></h1>
-      <p class="lede">Trade YES or NO on crypto, sports, politics and world events with up to 10× leverage. Create your own markets and earn from every trade, or put your ${S()} to work in the vault.</p>
+      <p class="lede">Trade YES or NO on crypto, sports, politics and world events. Create your own markets and earn from every trade, or put your ${S()} to work in the vault.</p>
       <div class="hero-cta"><a class="btn btn-grad" href="#/markets">Start trading</a><a class="btn btn-ghost" href="#/create">Create a market</a></div>
       <div class="hero-stats">
         <div><b class="num">${compact(all.reduce((a, m) => a + m.vol, 0))}</b><small>Volume traded</small></div>
@@ -107,7 +107,7 @@ async function pageHome(){
     </div>
     <div class="stage" aria-label="Featured market">
       <div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div>
-      <div class="float-chip fc1"><span class="av"></span><span>${f.feed[0] ? short(f.feed[0].addr).slice(0, 6) + " bought <b>" + esc(f.feed[0].side) + "</b>" : "Up to <b>10×</b> leverage"}</span></div>
+      <div class="float-chip fc1"><span class="av"></span><span>${f.feed[0] ? short(f.feed[0].addr).slice(0, 6) + " bought <b>" + esc(f.feed[0].side) + "</b>" : "Create a market, earn <b>0.5%</b>"}</span></div>
       <div class="float-chip fc2">Creator earned <b class="num">+${money(f.creatorEarned)}</b></div>
       <div class="dial-card">
         <div class="dial-top"><span class="live">Live</span><span class="num">${compact(f.vol)} vol</span></div>
@@ -131,9 +131,9 @@ async function pageHome(){
   <section class="section"><div class="wrap">
     <div class="sec-head"><div><h2 class="h2">Four ways to earn</h2><p class="lede">One protocol, four roles. Pick one or do them all.</p></div></div>
     <div class="steps">
-      <a class="step" href="#/markets"><span class="n">TRADE</span><h3>Call outcomes, up to 10×</h3><p>Buy YES or NO. Add leverage on high-volume markets. Exit any time before the end.</p></a>
+      <a class="step" href="#/markets"><span class="n">TRADE</span><h3>Call outcomes</h3><p>Buy YES or NO on any live market. Sell any time before the end. Leverage up to 10× is coming soon.</p></a>
       <a class="step" href="#/create"><span class="n">CREATE</span><h3>Launch a market, earn 0.5%</h3><p>Ask a clear question. We seed the liquidity, you keep 0.5% of every trade on it for life.</p></a>
-      <a class="step" href="#/vault"><span class="n">PROVIDE</span><h3>Fund the vault</h3><p>Deposit ${S()} that backs leverage. Earn ${pct(CONFIG.LP_SHARE)} of protocol fees and up to 8× points.</p></a>
+      <a class="step" href="#/vault"><span class="n">PROVIDE</span><h3>Fund the vault</h3><p>Deposit ${S()} into the protocol vault. Earn ${pct(CONFIG.LP_SHARE)} of protocol fees and up to 8× points.</p></a>
       <a class="step" href="#/stake"><span class="n">STAKE</span><h3>Stake ${T()}</h3><p>Cut your fees by up to 50%, vote on outcomes and earn resolution rewards.</p></a>
     </div>
   </div></section>
@@ -201,7 +201,7 @@ async function pageMarket(id, query){
           <div class="chart" id="mkChart">${lineChart(m.history)}</div>
           <div class="kv4">
             <div><small>Volume</small><b class="num" id="mkVol">${compact(m.vol)}</b></div>
-            <div><small>Liquidity depth</small><b class="num">${compact(m.b * 10)}</b></div>
+            <div title="Protocol-funded liquidity: the most the market maker can lose on this market"><small>Liquidity</small><b class="num">${compact(m.b * Math.LN2)}</b></div>
             <div><small>Traders</small><b class="num">${num(m.traders)}</b></div>
             <div><small>Creator</small><b class="num">${esc(m.creator.length > 14 ? short(m.creator) : m.creator)}</b></div>
           </div>
@@ -250,8 +250,8 @@ function renderTrade(){
     <div class="field"><label for="amt" style="display:flex;justify-content:space-between"><span>Amount (${S()})</span><span class="num">Balance ${ACC ? num(ACC.stable, 2) : "0.00"}</span></label>
       <input class="input num" id="amt" type="number" min="1" step="any" inputmode="decimal" value="${margin}"></div>
     <div class="amt-quick">${[10, 50, 100, 500].map(v => `<button data-act="quick" data-v="${v}">$${v}</button>`).join("")}<button data-act="quick" data-v="max">Max</button></div>
-    <div class="lev"><div class="lev-head"><span>Leverage</span><b class="num">${lev}×</b></div>
-      <div class="lev-opts">${[1, 2, 3, 5, 10].map(L => `<button class="${L === lev ? "on" : ""}" data-act="lev" data-v="${L}" ${L > m.maxLev ? "disabled title='Unlocks at higher market volume'" : ""}>${L}×</button>`).join("")}</div></div>
+    ${!CONFIG.LEVERAGE_ENABLED ? `<a class="info" style="display:flex;justify-content:space-between;gap:8px" href="#/leverage"><span>Leverage up to 10×</span><b style="color:var(--cyan)">Coming soon →</b></a>` : `<div class="lev"><div class="lev-head"><span>Leverage</span><b class="num">${lev}×</b></div>
+      <div class="lev-opts">${[1, 2, 3, 5, 10].map(L => `<button class="${L === lev ? "on" : ""}" data-act="lev" data-v="${L}" ${L > m.maxLev ? "disabled title='Unlocks at higher market volume'" : ""}>${L}×</button>`).join("")}</div></div>`}
     <div class="summary" id="summary"></div>
     <button class="btn btn-grad" style="width:100%;margin-top:18px;height:48px" id="buyBtn" data-act="buy"></button>
     <p class="side-note" id="tradeNote"></p>`;
@@ -363,7 +363,7 @@ async function pagePortfolio(){
 async function pageVault(){
   const v = await api.getVault(), a = ACC, L = CONFIG.LOCKS.find(x => x.id === vState.lock);
   return `<section class="page-head"><div class="wrap">
-    ${head("Liquidity vault", `Deposit ${S()} to back leveraged traders. Depositors earn ${pct(CONFIG.LP_SHARE)} of protocol fees, and longer locks earn points faster.`)}
+    ${head("Liquidity vault", `Deposit ${S()} into the protocol vault. Depositors earn ${pct(CONFIG.LP_SHARE)} of protocol fees from every trade, and longer locks earn points faster.`)}
     <div class="stat-grid">
       <div class="panel stat"><small>Total deposited</small><b class="num">${compact(v.tvl)}</b></div>
       <div class="panel stat"><small>Lent to traders</small><b class="num">${pct(v.utilization, 1)}</b></div>
@@ -384,7 +384,7 @@ async function pageVault(){
         <h2 class="h3">Your deposits</h2>
         ${a && a.deposits.length ? `<div class="feed" style="margin-top:8px">${a.deposits.map(d => `<div><span><b style="color:var(--text)" class="num">${money(d.amount, 2)}</b> · ${CONFIG.LOCKS.find(x => x.id === d.lock).label} · ${d.mult}× points<br><small class="muted">${d.unlock > Date.now() ? "Unlocks " + fmtDate(new Date(d.unlock).toISOString()) : "Unlocked"}</small></span>
           <button class="btn btn-ghost btn-sm" data-act="withdraw" data-id="${esc(d.id)}" ${d.unlock > Date.now() ? "disabled style='opacity:.4'" : ""}>Withdraw</button></div>`).join("")}</div>` : `<p class="muted" style="margin-top:6px">No deposits yet.</p>`}
-        <div class="info">Your ${S()} is lent to traders who use leverage. If a leveraged trader is liquidated, the vault is repaid first. The vault can still lose money in extreme moves.</div>
+        <div class="info">Today the vault earns a share of every trading fee. When leverage launches, it will also lend to leveraged traders, who are closed out before their losses reach the vault. Deposits can still lose money in extreme moves.</div>
       </div>
     </div>
   </div></section>`;
@@ -471,7 +471,7 @@ async function pageLeaderboard(){
     <div class="tabs">${tab("profit", "Profit")}${tab("volume", "Volume")}${tab("points", "Points")}</div>
     <div class="panel"><div class="scroll-x"><table class="table">
       <thead><tr><th>#</th><th>Trader</th><th class="r">Profit</th><th class="r">Volume</th><th class="r">Win rate</th><th class="r">Points</th></tr></thead>
-      <tbody>${rows.map((r, i) => `<tr style="${r.you ? "background:rgba(124,242,106,.06)" : ""}"><td class="rank ${i < 3 ? "top" : ""}">${i + 1}</td><td class="num">${esc(r.addr)}${r.you ? ` <span class="tag ok">You</span>` : ""}</td><td class="r num ${r.pnl >= 0 ? "pos" : "neg"}">${signed(r.pnl, 0)}</td><td class="r num">${compact(r.volume)}</td><td class="r num">${r.win}%</td><td class="r num">${num(r.points)}</td></tr>`).join("")}</tbody>
+      <tbody>${rows.length ? "" : `<tr><td colspan="6" class="empty">No trades yet this season. <a href="#/markets" style="color:var(--cyan)">Make the first one</a>.</td></tr>`}${rows.map((r, i) => `<tr style="${r.you ? "background:rgba(124,242,106,.06)" : ""}"><td class="rank ${i < 3 ? "top" : ""}">${i + 1}</td><td class="num">${esc(r.addr)}${r.you ? ` <span class="tag ok">You</span>` : ""}</td><td class="r num ${r.pnl >= 0 ? "pos" : "neg"}">${signed(r.pnl, 0)}</td><td class="r num">${compact(r.volume)}</td><td class="r num">${r.win}%</td><td class="r num">${num(r.points)}</td></tr>`).join("")}</tbody>
     </table></div></div>
   </div></section>`;
 }
@@ -485,7 +485,8 @@ async function pageAffiliate(){
   let tier = CONFIG.REF_TIERS[0]; CONFIG.REF_TIERS.forEach(t => { if(a.stats.volume >= t.min) tier = t; });
   const next = CONFIG.REF_TIERS[CONFIG.REF_TIERS.indexOf(tier) + 1];
   const prog = next ? Math.min(100, (a.stats.volume - tier.min) / (next.min - tier.min) * 100) : 100;
-  const link = a.code ? `${CONFIG.SITE_URL}/?ref=${a.code}` : "";
+  const site = location.protocol.startsWith("http") ? location.origin : CONFIG.SITE_URL;
+  const link = a.code ? `${site}/?ref=${a.code}` : "";
   const max = Math.max(0.01, ...a.earnings);
   const days = a.earnings.map((_, i) => { const d = new Date(); d.setDate(d.getDate() - (a.earnings.length - 1 - i)); return d.getDate(); });
   const msg = `I'm calling outcomes on ${CONFIG.SITE_NAME}. Join with my link and pay ${pct(CONFIG.REF_DISCOUNT)} less in fees: `;
@@ -505,7 +506,7 @@ async function pageAffiliate(){
             <a class="btn btn-ghost btn-sm" target="_blank" rel="noopener" href="https://x.com/intent/tweet?text=${encodeURIComponent(msg + link)}">Share on X</a>
             <a class="btn btn-ghost btn-sm" target="_blank" rel="noopener" href="https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent("Trade predictions on " + CONFIG.SITE_NAME)}">Share on Telegram</a>
             <a class="btn btn-ghost btn-sm" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(msg + link)}">Share on WhatsApp</a>
-          </div>` : `<p class="muted" style="margin-top:6px">Pick a short code. It becomes your link, like ${esc(CONFIG.SITE_URL.replace(/^https?:\/\//, ""))}/?ref=yourname</p>`}
+          </div>` : `<p class="muted" style="margin-top:6px">Pick a short code. It becomes your link, like ${esc(site.replace(/^https?:\/\//, ""))}/?ref=yourname</p>`}
         <div class="field"><label for="code">${a.code ? "Change your code" : "Referral code"}</label>
           <div class="field-row"><input class="input" id="code" maxlength="20" placeholder="yourname" value="${esc(a.code || "")}" autocomplete="off"><button class="btn btn-ghost" data-act="saveCode">${a.code ? "Update" : "Create link"}</button></div>
           <small id="codeErr" class="err"></small></div>
@@ -559,10 +560,10 @@ async function pageDocs(){
   const sec = [
     ["start", "Getting started", `<p>1. Install a wallet app like MetaMask or Trust Wallet. 2. Click <b>Connect wallet</b>; we switch you to ${esc(CONFIG.CHAIN.chainName)} automatically. 3. Open the wallet menu and click <b>Get test funds</b> for ${num(CONFIG.FAUCET_STABLE)} test ${S()} and ${num(CONFIG.FAUCET_TOKEN)} test ${T()}. 4. Pick a market and buy YES or NO.</p>`],
     ["prices", "How prices work", `<p>Prices come from an automated market maker called <b>LMSR</b> (Logarithmic Market Scoring Rule). It always quotes a price, so you never wait for someone to take the other side. YES + NO always add up to $1. Buying YES pushes the YES price up; the size of the move depends on the market's liquidity depth.</p><p>The protocol's worst-case loss per market is capped at <code>b × ln 2</code>, where <code>b</code> is the liquidity setting. That makes it safe to seed every new market automatically.</p>`],
-    ["leverage", "Leverage", `<p>Leverage lets you open a bigger position than your deposit. At 5× a $100 deposit opens a $500 position; the extra $400 is borrowed from the vault.</p><ul><li>Available leverage depends on market volume: ${CONFIG.LEVERAGE_TIERS.map(([l, v]) => `${l}× from ${compact(v)}`).join(", ")}.</li><li>If your position's value minus the borrowed amount falls below ${pct(CONFIG.MAINTENANCE)} of its size, it is <b>liquidated</b> and you lose your deposit.</li><li>The liquidation price is shown before you trade.</li></ul>`],
+    ["leverage", "Leverage (coming soon)", `<p><b>Leverage is not live yet.</b> When it launches, it will let you open a bigger position than your deposit. At 5× a $100 deposit opens a $500 position; the extra $400 is borrowed from the vault.</p><ul><li>Available leverage depends on market volume: ${CONFIG.LEVERAGE_TIERS.map(([l, v]) => `${l}× from ${compact(v)}`).join(", ")}.</li><li>If your position's value minus the borrowed amount falls below ${pct(CONFIG.MAINTENANCE)} of its size, it is <b>liquidated</b> and you lose your deposit.</li><li>Positions from ${money(CONFIG.LEVERAGE_MIN)} to ${money(CONFIG.LEVERAGE_MAX)} at launch.</li><li>The liquidation price is shown before you trade.</li></ul><p><a href="#/leverage" style="color:var(--cyan)">Try the leverage simulator →</a></p>`],
     ["fees", "Fees", `<p>Each trade pays ${pct(CONFIG.CREATOR_FEE + CONFIG.PROTOCOL_FEE, 1)} of its size: ${pct(CONFIG.CREATOR_FEE, 1)} to the market creator and ${pct(CONFIG.PROTOCOL_FEE, 1)} to the protocol. ${pct(CONFIG.LP_SHARE)} of the protocol fee goes to vault depositors. Staking ${T()} cuts fees by up to 50%, and invited users get ${pct(CONFIG.REF_DISCOUNT)} off.</p>`],
     ["create", "Creating markets", `<p>Anyone can create a market by posting a ${num(CONFIG.CREATE_BOND)} ${T()} bond. The protocol seeds the liquidity, so creators take no market-making risk and earn ${pct(CONFIG.CREATOR_FEE, 1)} of every trade for the life of the market. The bond comes back when the market resolves cleanly; unclear or abusive markets can lose it.</p>`],
-    ["vault", "Vault", `<p>Vault depositors provide the ${S()} that leveraged traders borrow. In return they earn ${pct(CONFIG.LP_SHARE)} of protocol fees. Choose a lock period: ${CONFIG.LOCKS.map(l => `${l.label} (${l.mult}× points)`).join(", ")}. Longer locks earn points faster.</p>`],
+    ["vault", "Vault", `<p>Vault depositors provide ${S()} liquidity to the protocol (and, once leverage launches, the money leveraged traders borrow). In return they earn ${pct(CONFIG.LP_SHARE)} of protocol fees. Choose a lock period: ${CONFIG.LOCKS.map(l => `${l.label} (${l.mult}× points)`).join(", ")}. Longer locks earn points faster.</p>`],
     ["resolve", "Resolution", `<p>When a market ends it moves to <b>Resolving</b>. ${T()} stakers vote YES or NO based on the listed resolution source. Votes are weighted by stake. Voters on the final outcome earn rewards. Winning shares then pay $1 each and positions settle automatically.</p>`],
     ["points", "Points & badges", `<p>Points track how much you use ${CONFIG.SITE_NAME}: trading, vault deposits, staking, creating markets, correct votes, referrals and badges. Points are planned to convert into ${T()} at launch; the exact formula will be announced.</p>`],
     ["risks", "Risks", `<ul><li>You can lose everything you put into a trade, and leverage makes losses faster.</li><li>Smart contracts can have bugs.</li><li>Resolution relies on voters reading the source correctly.</li><li>Prediction markets may be restricted where you live. Check your local laws.</li></ul>`]
@@ -574,9 +575,69 @@ async function pageDocs(){
   </div></section>`;
 }
 
+/* ---------- leverage (coming soon) ---------- */
+const simState = { p: 0.5, side: "YES", lev: 5, amt: 200 };
+// liquidation price for a fresh position, ignoring price impact (good enough for a simulator)
+function levMath(p, lev, amt){
+  const size = amt * lev, fee = size * (CONFIG.CREATOR_FEE + CONFIG.PROTOCOL_FEE), shares = (size - fee) / p, borrowed = size - amt;
+  const liq = lev > 1 ? Math.min(p, (borrowed + CONFIG.MAINTENANCE * size) / shares) : 0;
+  return { size, fee, shares, borrowed, liq, profit: shares - borrowed - amt };
+}
+async function pageLeverage(){
+  const tiers = CONFIG.LEVERAGE_TIERS;
+  const rows = tiers.map(([L]) => { const liq = levMath(0.5, L, 100).liq; return `<div class="liq-row"><b class="num">${L}×</b>
+    <div class="liq-track"><i style="width:${(liq * 100).toFixed(1)}%"></i><s style="left:${(liq * 100).toFixed(1)}%"></s><u style="left:50%"></u></div>
+    <span class="num neg">${cents(liq)}</span></div>`; }).join("");
+  return `<section class="page-head"><div class="wrap">
+    <div class="lev-hero">
+      <div>
+        <div class="eyebrow">Leverage · Coming soon</div>
+        <h1 class="lev-h1">Soon: trade with up to <span class="g">10×</span> leverage.</h1>
+        <p class="lede" style="font-size:17px">Bigger positions on the same markets you already trade. Leverage switches on for a market once it has enough volume and traders to price it safely, starting at 2× and rising to 10× on the deepest markets. ${money(CONFIG.LEVERAGE_MIN)} minimum and ${money(CONFIG.LEVERAGE_MAX)} maximum per position at launch, with automatic liquidations.</p>
+        <div class="hero-cta"><a class="btn btn-grad" href="#/markets">Browse live markets →</a><a class="btn btn-ghost" href="#/leverage" data-act="jumpSim">Try the simulator</a></div>
+      </div>
+      <div class="panel pad">
+        <div class="liq-head"><span>LIQUIDATION BY TIER</span><span>YES bought at 50¢</span></div>
+        <div class="liq-rows">${rows}</div>
+        <p class="side-note" style="border-top:1px solid var(--line-soft);padding-top:14px;margin-top:18px">The red zone is where the YES price would close your position. Higher leverage means a smaller move wipes you out.</p>
+      </div>
+    </div>
+
+    <h2 class="h3" style="margin:40px 0 12px">When leverage unlocks on a market</h2>
+    <div class="steps">${tiers.map(([L, v]) => `<div class="step"><span class="n">${L}×</span><h3>${compact(v)}+ volume</h3><p>Liquidated if the price falls about ${Math.round((0.5 - levMath(0.5, L, 100).liq) * 100)} points from a 50¢ entry.</p></div>`).join("")}</div>
+
+    <div class="two" id="sim" style="margin-top:40px">
+      <div class="panel pad">
+        <h2 class="h3">Leverage simulator</h2><p class="muted" style="margin-top:4px">See what a leveraged position would look like. Nothing is traded.</p>
+        <div class="side-tabs" style="margin-top:16px"><button class="y ${simState.side === "YES" ? "on" : ""}" data-act="simSide" data-v="YES">Yes</button><button class="n ${simState.side === "NO" ? "on" : ""}" data-act="simSide" data-v="NO">No</button></div>
+        <div class="field"><label for="simP" style="display:flex;justify-content:space-between"><span>Entry price of ${simState.side}</span><b class="num" id="simPv" style="color:var(--text)">${cents(simState.p)}</b></label><input id="simP" type="range" min="5" max="95" value="${Math.round(simState.p * 100)}"></div>
+        <div class="field"><label for="simAmt">Your deposit (${S()})</label><input class="input num" id="simAmt" type="number" min="${CONFIG.LEVERAGE_MIN}" max="${CONFIG.LEVERAGE_MAX}" value="${simState.amt}"></div>
+        <div class="lev"><div class="lev-head"><span>Leverage</span><b class="num">${simState.lev}×</b></div>
+          <div class="lev-opts">${[2, 3, 5, 10].map(L => `<button class="${L === simState.lev ? "on" : ""}" data-act="simLev" data-v="${L}">${L}×</button>`).join("")}</div></div>
+      </div>
+      <div class="panel pad"><h2 class="h3">Result</h2><div class="summary" id="simOut"></div></div>
+    </div>
+  </div></section>`;
+}
+function updateSim(){
+  const out = $("#simOut"); if(!out) return;
+  simState.p = +$("#simP").value / 100; simState.amt = Math.max(0, +$("#simAmt").value || 0);
+  $("#simPv").textContent = cents(simState.p);
+  const r = levMath(simState.p, simState.lev, simState.amt), drop = simState.p - r.liq;
+  const bad = simState.amt < CONFIG.LEVERAGE_MIN || simState.amt > CONFIG.LEVERAGE_MAX;
+  out.innerHTML = `<div><span>Position size</span><b class="num">${money(r.size, 2)}</b></div>
+    <div><span>Borrowed from the vault</span><b class="num">${money(r.borrowed, 2)}</b></div>
+    <div><span>Shares of ${simState.side}</span><b class="num">${num(r.shares, 2)}</b></div>
+    <div><span>Fee</span><b class="num">${money(r.fee, 2)}</b></div>
+    <div><span>Liquidated if ${simState.side} falls to</span><b class="num neg">${cents(r.liq)} (−${(drop * 100).toFixed(1)} pts)</b></div>
+    <div><span>Lose if liquidated</span><b class="num neg">−${money(simState.amt, 2)}</b></div>
+    <div class="big"><span>Profit if ${simState.side} wins</span><b class="num">${signed(r.profit)}</b></div>
+    ${bad ? `<div class="warn">At launch, deposits must be between ${money(CONFIG.LEVERAGE_MIN)} and ${money(CONFIG.LEVERAGE_MAX)}.</div>` : ""}`;
+}
+
 /* ---------- more (mobile menu) ---------- */
 async function pageMore(){
-  const items = [["#/create", "Create market", "Launch a question and earn 0.5%"], ["#/vault", "Vault", "Earn fees on " + S()], ["#/stake", "Stake " + T(), "Lower fees, vote on outcomes"], ["#/resolve", "Resolution", "Vote on ended markets"], ["#/rewards", "Rewards", "Points and badges"], ["#/leaderboard", "Leaderboard", "Top traders"], ["#/affiliate", "Affiliate", "Your referral link"], ["#/token", T(), "Tokenomics"], ["#/docs", "Docs", "How everything works"]];
+  const items = [["#/leverage", "Leverage", "Up to 10× · coming soon"], ["#/create", "Create market", "Launch a question and earn 0.5%"], ["#/vault", "Vault", "Earn fees on " + S()], ["#/stake", "Stake " + T(), "Lower fees, vote on outcomes"], ["#/resolve", "Resolution", "Vote on ended markets"], ["#/rewards", "Rewards", "Points and badges"], ["#/leaderboard", "Leaderboard", "Top traders"], ["#/affiliate", "Affiliate", "Your referral link"], ["#/token", T(), "Tokenomics"], ["#/docs", "Docs", "How everything works"]];
   return `<section class="page-head"><div class="wrap">${head("More", "")}<div class="more-list">${items.map(([h, t, d]) => `<a href="${h}"><div><b>${t}</b><small>${d}</small></div><span class="muted">›</span></a>`).join("")}</div></div></section>`;
 }
 
@@ -600,9 +661,9 @@ function setDial(v){
 /* =====================================================================
    ROUTER
    ===================================================================== */
-const PAGES = { home: pageHome, markets: pageMarkets, market: pageMarket, create: pageCreate, portfolio: pagePortfolio, vault: pageVault, stake: pageStake,
+const PAGES = { home: pageHome, markets: pageMarkets, leverage: pageLeverage, market: pageMarket, create: pageCreate, portfolio: pagePortfolio, vault: pageVault, stake: pageStake,
   resolve: pageResolve, rewards: pageRewards, leaderboard: pageLeaderboard, affiliate: pageAffiliate, token: pageToken, docs: pageDocs, more: pageMore };
-const MORE = ["create", "resolve", "affiliate", "token", "docs"];
+const MORE = ["create", "stake", "resolve", "affiliate", "token", "docs"];
 
 async function route(keepScroll){
   const raw = location.hash.replace(/^#\/?/, ""), [path, qs = ""] = raw.split("?");
@@ -634,6 +695,7 @@ function afterRender(r){
     pollT = setInterval(refreshMarket, 15000);
   }
   if(r === "create"){ ["cq", "ccat", "cend", "cp"].forEach(id => $("#" + id)?.addEventListener("input", previewCreate)); if($("#cprev")) previewCreate(); }
+  if(r === "leverage"){ ["simP", "simAmt"].forEach(id => $("#" + id).addEventListener("input", updateSim)); updateSim(); }
   if(r === "vault" && $("#vamt")){ $("#vamt").addEventListener("input", updateVaultSum); updateVaultSum(); }
 }
 
@@ -711,6 +773,9 @@ const ACTIONS = {
     await busy(el, "Finalizing…", async () => { const r = await api.finalize({ id: el.dataset.id }); toast("Resolved " + r.outcome); await refreshAccount(); route(true); });
   },
   lb(el){ vState.lb = el.dataset.v; route(true); },
+  simSide(el){ simState.side = el.dataset.v; route(true); },
+  simLev(el){ simState.lev = +el.dataset.v; route(true); },
+  jumpSim(el, e){ e.preventDefault(); $("#sim")?.scrollIntoView({ behavior: reduce ? "auto" : "smooth" }); },
   jump(el, e){ e.preventDefault(); $("#d-" + el.dataset.v)?.scrollIntoView({ behavior: reduce ? "auto" : "smooth" }); },
   async saveCode(el){
     const v = $("#code").value.trim().toLowerCase(), err = $("#codeErr");

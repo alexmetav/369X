@@ -413,3 +413,19 @@ input[type=range]{width:100%;accent-color:var(--mint)}
 .more-list a{display:flex;justify-content:space-between;align-items:center;padding:16px 18px;border-radius:16px;border:1px solid var(--line);background:var(--panel)}
 .more-list small{display:block;color:var(--text-3);font-size:12px}
 @media (max-width:600px){.demo-banner span{display:none}}
+
+/* leverage page */
+.lev-hero{display:grid;grid-template-columns:1.1fr 1fr;gap:clamp(24px,5vw,72px);align-items:center;padding-top:clamp(12px,3vw,40px)}
+@media (max-width:960px){.lev-hero{grid-template-columns:1fr}}
+.eyebrow{display:flex;align-items:center;gap:12px;font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--text-2)}
+.eyebrow::before{content:"";width:28px;height:1px;background:var(--line)}
+.lev-h1{font-family:var(--display);font-weight:500;font-size:clamp(36px,5.6vw,72px);line-height:1;letter-spacing:-.035em;margin-top:18px}
+.lev-h1 .g{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+.liq-head{display:flex;justify-content:space-between;gap:12px;font-size:11px;letter-spacing:.14em;color:var(--text-3)}
+.liq-rows{display:grid;gap:22px;margin-top:24px}
+.liq-row{display:grid;grid-template-columns:36px 1fr 48px;gap:14px;align-items:center;font-size:14px}
+.liq-row span{text-align:right}
+.liq-track{position:relative;height:6px;border-radius:99px;background:rgba(255,255,255,.07)}
+.liq-track i{position:absolute;left:0;top:0;bottom:0;border-radius:99px;background:rgba(255,122,136,.35)}
+.liq-track s{position:absolute;top:-4px;width:2px;height:14px;background:var(--no);border-radius:2px}
+.liq-track u{position:absolute;top:-4px;width:2px;height:14px;background:var(--lime);border-radius:2px}

@@ -92,7 +92,7 @@ const Engine = {
   user(addr){ return { ...Engine.blankUser(), ...store.get("u:" + addr.toLowerCase(), {}) }; },
   saveUser(addr, u){ store.set("u:" + addr.toLowerCase(), u); },
 
-  maxLeverage(m){ let L = 1; CONFIG.LEVERAGE_TIERS.forEach(([lev, min]) => { if(m.vol >= min) L = lev; }); return L; },
+  maxLeverage(m){ if(!CONFIG.LEVERAGE_ENABLED) return 1; let L = 1; CONFIG.LEVERAGE_TIERS.forEach(([lev, min]) => { if(m.vol >= min) L = lev; }); return L; },
   stakeTier(staked){ let t = CONFIG.STAKE_TIERS[0]; CONFIG.STAKE_TIERS.forEach(x => { if(staked >= x.min) t = x; }); return t; },
   feeRate(u, ref){
     const base = CONFIG.CREATOR_FEE + CONFIG.PROTOCOL_FEE;
@@ -201,8 +201,9 @@ const Engine = {
     return [
       { ico: "🎯", name: "First call", desc: "Place your first trade", got: u.trades >= 1 },
       { ico: "🔥", name: "On a roll", desc: "Place 10 trades", got: u.trades >= 10 },
+      ...(CONFIG.LEVERAGE_ENABLED ? [
       { ico: "🚀", name: "Leverage up", desc: "Open a 5× position", got: u.maxLev >= 5 },
-      { ico: "⚡", name: "Max power", desc: "Open a 10× position", got: u.maxLev >= 10 },
+      { ico: "⚡", name: "Max power", desc: "Open a 10× position", got: u.maxLev >= 10 }] : []),
       { ico: "🐋", name: "Whale", desc: "Trade $10K volume", got: u.volume >= 10000 },
       { ico: "🏗", name: "Market maker", desc: "Create a market", got: created >= 1 },
       { ico: "🏦", name: "Liquidity provider", desc: "Deposit into the vault", got: u.deposits.length >= 1 },

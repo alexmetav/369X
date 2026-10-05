@@ -75,11 +75,51 @@ function renderNav(){
       </div></details>`;
 }
 let accSeq = 0;
+/* ---------- mobile / tablet menu drawer ---------- */
+function renderDrawer(){
+  const el = $("#drawer"); if(!el) return;
+  const r = (location.hash.replace(/^#\/?/, "").split(/[/?]/)[0]) || "home";
+  const link = (h, icon, label, sub) => { const key = h.replace("#/", "") || "home";
+    return `<a href="${h}" class="${key === r || (key === "markets" && r === "market") ? "on" : ""}">${ic(icon, "g")}<span><b>${label}</b>${sub ? `<small>${sub}</small>` : ""}</span></a>`; };
+  const a = wallet.address;
+  const group = (title, items) => `<div class="dr-group"><div class="dr-title">${title}</div>${items.join("")}</div>`;
+  el.innerHTML = `<div class="dr-head"><a href="#/" class="logo" aria-label="369X home"><img src="assets/logo.png" alt="369X" width="78" height="32"></a>
+      <button class="close" data-act="drawerClose" aria-label="Close menu">${ic("x")}</button></div>
+    <div class="dr-wallet">${a ? `<div class="dr-addr"><span class="addr-dot"></span><b class="num">${esc(short(a))}</b>${wallet.wrongChain ? `<button class="btn btn-sm net-warn" data-act="switchChain">Wrong network</button>` : ""}</div>
+        <div class="dr-bals"><div><small>${S()}</small><b class="num">${ACC ? num(ACC.stable, 2) : "…"}</b></div><div><small>${T()}</small><b class="num">${ACC ? compactN(ACC.token) : "…"}</b></div></div>
+        <div class="dr-acts"><button class="btn btn-grad btn-sm" data-act="faucet">${ic("drop")}Test funds</button><button class="btn btn-ghost btn-sm" data-act="copyAddr">${ic("copy")}Copy</button></div>`
+      : `<button class="btn btn-grad" style="width:100%" data-act="connect">Connect wallet</button>`}</div>
+    ${group("Trade", [link("#/", "home", "Home"), link("#/markets", "portfolio", "Markets", "Live predictions"), link("#/portfolio", "coins", "Portfolio", "Positions and P&amp;L"),
+      link("#/create", "plus", "Create market", "Earn " + pct(CONFIG.CREATOR_FEE, 1) + " of every trade"), link("#/leverage", "bolt", "Leverage", "Coming soon")])}
+    ${group("Earn", [link("#/vault", "vault", "Vault", "Earn protocol fees"), link("#/stake", "shield", "Stake " + T(), "Vote and earn fees"), link("#/resolve", "ballot", "Resolution", "Vote on ended markets"),
+      link("#/rewards", "diamond", "Rewards", "Points and badges"), link("#/leaderboard", "trophy", "Leaderboard"), link("#/affiliate", "link", "Affiliate", "Your referral link")])}
+    ${CHAIN_ON && ACC?.isAdmin ? group("Owner", [link("#/admin", "shield", "Safety panel"), link("#/analytics", "analytics", "Analytics")]) : ""}
+    ${group("Learn", [link("#/token", "crypto", T() + " token"), link("#/docs", "book", "Docs"), link("#/legal", "file", "Terms, privacy and risk")])}
+    ${a ? `<div class="dr-foot">${CHAIN_ON ? `<a class="btn btn-ghost btn-sm" href="${CONFIG.CHAIN.blockExplorerUrls[0]}/address/${esc(a)}" target="_blank" rel="noopener">${ic("external")}BscScan</a>` : ""}<button class="btn btn-ghost btn-sm" data-act="disconnect">${ic("logout")}Disconnect</button></div>` : ""}`;
+}
+let drawerReturn = null;
+function openDrawer(){
+  const w = $("#drawerWrap"); if(!w) return;
+  renderDrawer(); drawerReturn = document.activeElement;
+  w.hidden = false; requestAnimationFrame(() => w.classList.add("open"));
+  $(".nav-burger")?.setAttribute("aria-expanded", "true"); document.body.style.overflow = "hidden";
+  setTimeout(() => $("#drawer .close")?.focus(), 50);
+}
+function closeDrawer(){
+  const w = $("#drawerWrap"); if(!w || w.hidden) return;
+  w.classList.remove("open"); $(".nav-burger")?.setAttribute("aria-expanded", "false"); document.body.style.overflow = "";
+  setTimeout(() => { w.hidden = true; }, 220); drawerReturn?.focus?.();
+}
+document.addEventListener("keydown", e => { if(e.key === "Escape") closeDrawer(); });
+window.addEventListener("hashchange", closeDrawer);
+window.addEventListener("resize", () => { if(innerWidth > 1100) closeDrawer(); });
+
 async function refreshAccount(){
   const n = ++accSeq, a = wallet.address;
   const acc = a ? await api.getAccount(a).catch(() => null) : null;
   if(n !== accSeq || a !== wallet.address) return;          // a newer refresh (or a wallet switch) won
   ACC = acc; renderNav();
+  if(!$("#drawerWrap")?.hidden) renderDrawer();
 }
 async function onWalletChange(){ await refreshAccount(); if(CHAIN_ON && CONFIG.CONTRACTS.referral) inviteBanner(); route(); }
 
@@ -216,7 +256,8 @@ async function pageMarkets(){
 }
 let fillSeq = 0;
 async function fillMarkets(){
-  const n = ++fillSeq;
+  const n = ++fillSeq, g0 = $("#mgrid");
+  if(g0 && !g0.children.length) g0.innerHTML = `<div style="grid-column:1/-1">${loader("Loading markets…", true)}</div>`;
   const list = await api.getMarkets({ category: mState.cat, q: mState.q, status: mState.status, sort: mState.sort });
   if(n !== fillSeq) return;                                  // the user changed the filter meanwhile
   const g = $("#mgrid"); if(!g) return;
@@ -909,12 +950,20 @@ async function route(keepScroll){
   clearInterval(pollT);
   if(wallet.address && !ACC) await refreshAccount();
   const app = $("#app");
+  // show the 369X loader if a new page takes more than a moment (not on in-place refreshes)
+  const LOAD_TEXT = { home: "Loading markets…", markets: "Loading markets…", market: "Loading market…", portfolio: "Loading your portfolio…",
+    vault: "Loading the vault…", stake: "Loading staking…", resolve: "Loading results…", leaderboard: "Loading the leaderboard…",
+    affiliate: "Loading your rewards…", rewards: "Loading your points…", admin: "Checking safety settings…", analytics: "Crunching the numbers…" };
+  const loadT = keepScroll ? null : setTimeout(() => { if(seq === routeSeq){ document.body.classList.add("page-loading"); app.innerHTML = `<section class="page-head"><div class="wrap">${loader(LOAD_TEXT[r] || "Loading…")}</div></section>`; } }, 180);
   let html;
   try{ html = await PAGES[r](r === "market" ? param : query, query); }
   catch(e){ console.error(e); html = `<section class="page-head"><div class="wrap"><div class="panel empty">Something went wrong: ${esc(e.message)}<br><a class="btn btn-ghost" href="#/">Go home</a></div></div></section>`; }
+  clearTimeout(loadT);
   if(seq !== routeSeq) return;                  // user moved on while this page was loading
+  document.body.classList.remove("page-loading");
   app.innerHTML = html;
   afterRender(r);
+  hideSplash();
   if(!keepScroll) window.scrollTo({ top: 0 });
 }
 function afterRender(r){
@@ -942,13 +991,23 @@ function afterRender(r){
    BUTTON ACTIONS  (every data-act="..." lands here)
    ===================================================================== */
 async function busy(btn, label, fn){
-  const old = btn?.textContent; if(btn){ btn.disabled = true; btn.textContent = label; }
-  try{ await fn(); }catch(e){ toast(e.message, true); if(btn && document.body.contains(btn)){ btn.disabled = false; btn.textContent = old; } }
+  const old = btn?.innerHTML;
+  if(btn){ btn.disabled = true; btn.classList.add("is-busy"); btn.innerHTML = `<span class="xl-ring" aria-hidden="true"></span>${label === "…" ? "" : esc(label)}`; btn.setAttribute("aria-busy", "true"); }
+  try{ await fn(); }
+  catch(e){ toast(e.message, true); if(btn && document.body.contains(btn)){ btn.disabled = false; btn.classList.remove("is-busy"); btn.removeAttribute("aria-busy"); btn.innerHTML = old; } }
 }
 const ACTIONS = {
   noop(){},
-  connect(){ return wallet.connect(); },
-  disconnect(){ ACC = null; wallet.disconnect(); },
+  async connect(el){
+    closeDrawer();
+    const old = el?.innerHTML;
+    if(el){ el.disabled = true; el.innerHTML = `<span class="xl-ring" aria-hidden="true"></span>Connecting…`; }
+    try{ await wallet.connect(); }
+    finally{ if(el && document.body.contains(el)){ el.disabled = false; el.innerHTML = old; } }
+  },
+  drawerOpen(){ openDrawer(); },
+  drawerClose(){ closeDrawer(); },
+  disconnect(){ closeDrawer(); ACC = null; wallet.disconnect(); },
   switchChain(){ return wallet.switchChain(); },
   copyAddr(){ copyText(wallet.address, "Address copied"); },
   copy(el){ copyText(el.dataset.v, "Link copied"); },
@@ -1100,6 +1159,14 @@ document.addEventListener("click", e => {
 });
 document.addEventListener("input", e => { if(e.target.id === "amt" && tState.m){ tState.margin = Math.max(0, +e.target.value || 0); updateQuote(); } });
 window.addEventListener("hashchange", () => route());
+
+// full-screen 369X splash: shown from the first paint until the first page is ready
+function hideSplash(){
+  const s = $("#splash"); if(!s || s.classList.contains("out")) return;
+  s.classList.add("out"); document.body.classList.remove("booting");
+  setTimeout(() => s.remove(), 600);
+}
+setTimeout(hideSplash, 15000);                  // never leave people staring at it
 
 (async function start(){
   captureRef();

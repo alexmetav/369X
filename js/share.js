@@ -132,7 +132,7 @@ function shareModal(){
       <button class="close" data-act="shareClose" aria-label="Close">${ic("x")}</button>
       <div class="share-body">
         <h2 class="h3">Share your P&amp;L</h2>
-        <div class="share-preview"><img id="shareImg" alt="Your P&L card"></div>
+        <div class="share-preview"><img id="shareImg" alt="Your P&L card"><div class="share-loading" id="shareLoading">${loader("Drawing your card…", true)}</div></div>
         <label class="chk share-hide"><input type="checkbox" id="shareHide"> Hide dollar amounts (show % only)</label>
         <p class="side-note" id="shareRefNote"></p>
         <div class="share-actions">
@@ -164,8 +164,9 @@ async function openShare(item){
 }
 async function renderShare(){
   const img = $("#shareImg"); if(!img || !SHARE.item) return;
-  img.style.opacity = .5;
+  img.style.opacity = .5; $("#shareLoading").hidden = false;
   const cv = await drawShareCard(SHARE.item, SHARE.hide);
+  $("#shareLoading").hidden = true;
   SHARE.url = cv.toDataURL("image/png"); SHARE.canvas = cv;
   img.src = SHARE.url; img.style.opacity = 1;
   const nb = $("#shareNativeBtn");

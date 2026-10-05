@@ -56,7 +56,9 @@ function tierRows(vol){
 function renderNav(){
   const a = wallet.address, slot = $("#walletSlot");
   if(!a){ slot.innerHTML = `<button class="btn btn-grad btn-sm" data-act="connect">Connect wallet</button>`; return; }
-  const bal = ACC ? `<a class="bal-pill" href="#/portfolio"><b class="num">${num(ACC.stable, 2)}</b> ${S()}</a>` : "";
+  const bal = ACC ? (CHAIN_ON
+      ? `<a class="tn-pill" href="#/portfolio" title="Your testnet balance (free test tokens)"><span class="tn-dot"></span><span class="tn-word">Testnet</span><b class="num">${compactN(ACC.stable)}</b><span class="tn-unit">${S()}</span><span class="tn-tok"><b class="num">${compactN(ACC.token)}</b> ${T()}</span></a>`
+      : `<a class="bal-pill" href="#/portfolio"><b class="num">${num(ACC.stable, 2)}</b> ${S()}</a>`) : "";
   const net = wallet.wrongChain ? `<button class="btn btn-sm net-warn" data-act="switchChain">Wrong network</button>` : "";
   slot.innerHTML = `${net}${bal}
     <details class="wallet-menu"><summary class="btn btn-ghost btn-sm addr-pill"><span class="addr-dot"></span><span class="num">${esc(short(a))}</span></summary>
@@ -94,7 +96,7 @@ function renderDrawer(){
     ${group("Earn", [link("#/vault", "vault", "Vault", "Earn protocol fees"), link("#/stake", "shield", "Stake " + T(), "Vote and earn fees"), link("#/resolve", "ballot", "Resolution", "Vote on ended markets"),
       link("#/rewards", "diamond", "Rewards", "Points and badges"), link("#/leaderboard", "trophy", "Leaderboard"), link("#/affiliate", "link", "Affiliate", "Your referral link")])}
     ${CHAIN_ON && ACC?.isAdmin ? group("Owner", [link("#/admin", "shield", "Safety panel"), link("#/analytics", "analytics", "Analytics")]) : ""}
-    ${group("Learn", [link("#/token", "crypto", T() + " token"), link("#/docs", "book", "Docs"), link("#/legal", "file", "Terms, privacy and risk")])}
+    ${group("Learn", [CHAIN_ON ? `<a href="#/" data-act="startTour">${ic("target", "g")}<span><b>Testnet guide</b><small>Join in 5 quick steps</small></span></a>` : "", link("#/token", "crypto", T() + " token"), link("#/docs", "book", "Docs"), link("#/legal", "file", "Terms, privacy and risk")])}
     ${a ? `<div class="dr-foot">${CHAIN_ON ? `<a class="btn btn-ghost btn-sm" href="${CONFIG.CHAIN.blockExplorerUrls[0]}/address/${esc(a)}" target="_blank" rel="noopener">${ic("external")}BscScan</a>` : ""}<button class="btn btn-ghost btn-sm" data-act="disconnect">${ic("logout")}Disconnect</button></div>` : ""}`;
 }
 let drawerReturn = null;
@@ -121,7 +123,7 @@ async function refreshAccount(){
   ACC = acc; renderNav();
   if(!$("#drawerWrap")?.hidden) renderDrawer();
 }
-async function onWalletChange(){ await refreshAccount(); if(CHAIN_ON && CONFIG.CONTRACTS.referral) inviteBanner(); route(); }
+async function onWalletChange(){ await refreshAccount(); if(typeof tourRefresh === "function") tourRefresh(); if(CHAIN_ON && CONFIG.CONTRACTS.referral) inviteBanner(); route(); }
 
 function captureRef(){
   const read = (s) => { const m = s.match(/[?&]ref=([A-Za-z0-9_-]{2,24})/); return m ? m[1] : null; };
@@ -175,7 +177,8 @@ async function pageHome(){
     <div>
       <h1><span id="scr1">Predict.</span><span id="scr2">Participate.</span><span class="g">Prosper.</span></h1>
       <p class="lede">Trade YES or NO on crypto, sports, politics and world events. Create your own markets and earn from every trade, or put your ${S()} to work in the vault.</p>
-      <div class="hero-cta"><a class="btn btn-grad" href="#/markets">Start trading</a><a class="btn btn-ghost" href="#/create">Create a market</a></div>
+      ${CHAIN_ON ? `<button class="tn-live" data-act="startTour"><span class="tn-dot"></span>Testnet is live<span class="tn-sub">Free test tokens · no real money</span></button>` : ""}
+      <div class="hero-cta"><button class="btn btn-grad" data-act="startTrading">Start trading${CHAIN_ON ? ` <span class="btn-tag">Testnet</span>` : ""}</button><a class="btn btn-ghost" href="#/create">Create a market</a></div>
       <div class="hero-stats">
         <div><b class="num">${compact(all.reduce((a, m) => a + m.vol, 0))}</b><small>Volume traded</small></div>
         <div><b class="num">${compact(vault.tvl)}</b><small>${CHAIN_ON && !CONFIG.CONTRACTS.vault ? "Protocol reserve" : "Vault liquidity"}</small></div>
@@ -1006,6 +1009,19 @@ const ACTIONS = {
     finally{ if(el && document.body.contains(el)){ el.disabled = false; el.innerHTML = old; } }
   },
   drawerOpen(){ openDrawer(); },
+  startTrading(){ if(CHAIN_ON && !store.get("tourSeen", false)) openTour(); else location.hash = "#/markets"; },
+  startTour(el, e){ e?.preventDefault(); closeDrawer(); openTour(); },
+  tourSkip(){ closeTour(false); },
+  tourNext(){ tourGo(1); },
+  tourBack(){ tourGo(-1); },
+  tourConnect(el){ tourRun(el, "Connecting…", "connect", () => wallet.connect()); },
+  tourSwitch(el){ tourRun(el, "Switching…", "network", () => wallet.switchChain()); },
+  tourGas(){ window.open(BNB_FAUCET, "_blank", "noopener"); toast("Paste your wallet address on the faucet page, then come back"); copyText(wallet.address, "Address copied for the faucet"); },
+  tourRecheck(el){ tourRun(el, "Checking…", "gas", async () => {}); },
+  tourFaucet(el){ tourRun(el, "Claiming…", "faucet", async () => { const r = await api.faucet(wallet.address) || {}; toast("Received " + [r.stable ? num(r.stable) + " " + S() : "", r.token ? num(r.token) + " " + T() : ""].filter(Boolean).join(" + ")); await refreshAccount(); }); },
+  tourMetaMask(){ location.href = "https://metamask.app.link/dapp/" + location.host + location.pathname; },
+  tourGetMetaMask(){ window.open("https://metamask.io/download/", "_blank", "noopener"); },
+  tourFinish(){ closeTour(true); location.hash = "#/markets"; },
   drawerClose(){ closeDrawer(); },
   disconnect(){ closeDrawer(); ACC = null; wallet.disconnect(); },
   switchChain(){ return wallet.switchChain(); },

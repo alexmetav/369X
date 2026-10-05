@@ -5,7 +5,7 @@ One post a day from **6 Oct 2026**. Times are IST: questions and polls at 1:00 P
 - **Media:** files are in `media/`. Attach the file listed under each post and paste the alt text into X's image description.
 - **Polls:** most schedulers can't create X polls. Post those from the X app (poll length: 1 day).
 - **Thread (post 7):** post the 5 parts as one thread; the banner goes on part 1.
-- **Link:** every link points to `https://369x-vercel.vercel.app`. If you add a custom domain later, replace it.
+- **Link:** posts say "Link in bio" instead of a web address, and the banners and video show no address. Put the site link in the X profile bio (Website field) once the final domain is ready. Changing the bio updates every post at once.
 
 | # | Date | Time | Type | Media |
 |---|---|---|---|---|
@@ -109,8 +109,7 @@ On-chain, on BNB Chain.
 → Real on-chain markets on BNB Chain
 → No real money, no risk
 
-Come break it before mainnet:
-https://369x-vercel.vercel.app
+Come break it before mainnet. Link in bio.
 ```
 
 **Media:** `media/B03-testnet-live.png`  
@@ -129,10 +128,10 @@ How to join the 369X testnet, start to finish:
 4. Claim free test tokens
 5. Tap YES or NO
 
-Under a minute. https://369x-vercel.vercel.app
+Under a minute. Link in bio.
 ```
 
-**Media:** `media/369x-testnet-how-to-join.mp4`  
+**Media:** `media/369x-testnet-how-to-join.mp4` (52 s, 1080p, original music and UI sounds included)  
 **Alt text:** Animated walkthrough: opening 369X, browsing markets, connecting a wallet, claiming test tokens and placing a YES trade
 
 ---
@@ -172,8 +171,7 @@ You don't have to wait for the end. Sell any time while the market is live, at w
 ```
 No order book, no waiting for someone to take the other side. An automated market maker (LMSR) always quotes a price.
 
-Try it with free test tokens:
-https://369x-vercel.vercel.app
+Try it with free test tokens. Link in bio.
 ```
 
 **Media:** `media/B04-how-a-trade-works.png`  
@@ -442,7 +440,7 @@ Leaderboard check.
 
 The top testnet traders by profit and volume are up right now, and there's plenty of room near the top.
 
-https://369x-vercel.vercel.app/#/leaderboard
+Link in bio → Leaderboard tab.
 ```
 
 ---
@@ -481,11 +479,10 @@ A month in.
 
 Testnet is live. Markets are open. Test tokens are free.
 
-If you've been watching from the sidelines, this is your sign:
-https://369x-vercel.vercel.app
+If you've been watching from the sidelines, this is your sign. Link in bio.
 
 Predict. Participate. Prosper.
 ```
 
 **Media:** `media/B11-your-sign.png`  
-**Alt text:** This is your sign to start predicting. 369X logo and site address.
+**Alt text:** This is your sign to start predicting. 369X logo with a Link in bio button.

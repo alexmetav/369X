@@ -178,7 +178,7 @@ async function pageHome(){
       <h1><span id="scr1">Predict.</span><span id="scr2">Participate.</span><span class="g">Prosper.</span></h1>
       <p class="lede">Trade YES or NO on crypto, sports, politics and world events. Create your own markets and earn from every trade, or put your ${S()} to work in the vault.</p>
       ${CHAIN_ON ? `<button class="tn-live" data-act="startTour"><span class="tn-dot"></span>Testnet is live<span class="tn-sub">Free test tokens · no real money</span></button>` : ""}
-      <div class="hero-cta"><button class="btn btn-grad" data-act="startTrading">Start trading${CHAIN_ON ? ` <span class="btn-tag">Testnet</span>` : ""}</button><a class="btn btn-ghost" href="#/create">Create a market</a></div>
+      <div class="hero-cta"><span class="run-border"><button class="btn btn-grad" data-act="startTrading">Start trading</button></span><a class="btn btn-ghost" href="#/create">Create a market</a></div>
       <div class="hero-stats">
         <div><b class="num">${compact(all.reduce((a, m) => a + m.vol, 0))}</b><small>Volume traded</small></div>
         <div><b class="num">${compact(vault.tvl)}</b><small>${CHAIN_ON && !CONFIG.CONTRACTS.vault ? "Protocol reserve" : "Vault liquidity"}</small></div>

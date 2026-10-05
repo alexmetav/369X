@@ -723,6 +723,8 @@ if(CHAIN_ON){
       await Chain.write(CONFIG.CONTRACTS.market, MARKET_ABI, "fundReserve", [amt]);
       return { ok: true };
     },
+    // tBNB (gas) balance of a wallet, for the testnet tour
+    async gasBalance(w){ return Chain.fmt(await Chain.retry(async () => (await Chain.readProvider()).getBalance(w))); },
     async trackClick(){},
     async claimStakeFees(){ await Chain.write(CONFIG.CONTRACTS.staking, STAKE_ABI, "claimFees", []); return { ok: true }; },
     async getLeaderboard(by = "profit"){

@@ -6,6 +6,7 @@ One post a day from **6 Oct 2026**. Times are IST: questions and polls at 1:00 P
 - **Polls:** most schedulers can't create X polls. Post those from the X app (poll length: 1 day).
 - **Thread (post 7):** post the 5 parts as one thread; the banner goes on part 1.
 - **Link:** posts say "Link in bio" instead of a web address, and the banners and video show no address. Put the site link in the X profile bio (Website field) once the final domain is ready. Changing the bio updates every post at once.
+- **Profile cover:** `media/X-header-1500x500.png` (sharper copy: `X-header-3000x1000.png`). The bottom-left corner is left empty for the profile photo.
 
 | # | Date | Time | Type | Media |
 |---|---|---|---|---|

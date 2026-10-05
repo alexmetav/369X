@@ -44,7 +44,7 @@ const CONFIG = {
   // vault + staking from before an upgrade: the website lets people withdraw from them
   CONTRACTS_OLD: { vault: "0x01681060c0179e60322D69F274F3cDbE83330971", staking: "0x79c163F2c33fdf0Db5e56723fe86961247048432" },
   // if you change these, also allow the new hosts in vercel.json (Content-Security-Policy connect-src)
-  READ_RPCS: ["https://bsc-testnet-rpc.publicnode.com", "https://data-seed-prebsc-1-s1.bnbchain.org:8545", "https://data-seed-prebsc-2-s1.bnbchain.org:8545"],
+  READ_RPCS: ["https://bsc-testnet-rpc.publicnode.com", "https://data-seed-prebsc-1-s1.bnbchain.org:8545", "https://data-seed-prebsc-2-s1.bnbchain.org:8545", "https://bsc-testnet.bnbchain.org", "https://bsc-testnet-dataseed.bnbchain.org"],
 
   // ---- network (BNB Smart Chain Testnet by default) ------------------
   CHAIN: {

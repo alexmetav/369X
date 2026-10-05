@@ -388,6 +388,11 @@ async function chainAccount(w){
   if(st) push("stake", [{ c: st, fn: "staked", args: [w] }, { c: st, fn: "lockedUntil", args: [w] }, { c: st, fn: "pendingFees", args: [w] },
     ...ended.map(m => ({ c: st, fn: "voteOf", args: [Number(m.id), w] }))]);
   if(rf) push("ref", [{ c: rf, fn: "codeOf", args: [w] }]);
+  // points and badges never go down: also count the pre-upgrade vault / staking contracts
+  const O = OLD(), rp = await Chain.readProvider();
+  const ov = O.vault ? new ethers.Contract(O.vault, VAULT_ABI, rp) : null, ost = O.staking ? new ethers.Contract(O.staking, STAKE_ABI, rp) : null;
+  if(ov) push("oldVault", [{ c: ov, fn: "depositsOf", args: [w] }, { c: ov, fn: "pointsOf", args: [w] }]);
+  if(ost) push("oldStake", ended.map(m => ({ c: ost, fn: "voteOf", args: [Number(m.id), w] })));
   const r = await Chain.multi(calls);
   if(r.slice(0, 6 + markets.length).some(x => x === null)) throw new Error("Couldn't read your account");
   const [stable, token, lfU, lfT, owner, resolver] = r, holdings = r.slice(6, 6 + markets.length);
@@ -427,18 +432,26 @@ async function chainAccount(w){
     isAdmin: [owner, resolver].some(a => a.toLowerCase() === me)
   };
   let vaultPts = 0;
+  const ever = { deposited: false, diamond: false, voted: false };
+  const seeDeposits = (dep) => { if(!dep) return; const list = dep[0] || []; if(list.length) ever.deposited = true; if(list.some(d => Number(d.lock) === 3)) ever.diamond = true; };
+  if(ov){ const i = extra.oldVault; seeDeposits(r[i]); vaultPts += r[i + 1] ? Chain.fmt(r[i + 1]) : 0; }
+  if(ost) ended.forEach((m, k) => { if(r[extra.oldStake + k]?.voted) ever.voted = true; });
   if(v){
     const i = extra.vault, dep = r[i], pts = r[i + 1];
+    seeDeposits(dep);
     if(dep){ const [list, pending] = dep;
       u.deposits = list.map((d, k) => ({ id: String(k), amount: Chain.fmt(d.amount), lock: LOCK_IDS[Number(d.lock)], mult: [1, 2, 4, 8][Number(d.lock)],
         start: Number(d.start) * 1000, unlock: Number(d.unlock) * 1000, earned: Chain.fmt(pending[k]), closed: d.closed })).filter(d => !d.closed); }
-    vaultPts = pts ? Chain.fmt(pts) : 0;
+    vaultPts += pts ? Chain.fmt(pts) : 0;
   }
   if(st){
     const i = extra.stake;
     u.staked = Chain.fmt(r[i] || 0n); u.lockedUntil = Number(r[i + 1] || 0n) * 1000; u.stakeFees = Chain.fmt(r[i + 2] || 0n);
     ended.forEach((m, k) => { const vo = r[i + 3 + k]; if(vo?.voted) u.votes[m.id] = { side: vo.yes ? "YES" : "NO", weight: Chain.fmt(vo.weight), claimed: vo.claimed }; });
   }
+  if(Object.keys(u.votes).length) ever.voted = true;
+  if(vaultPts > 0) ever.deposited = true;
+  u.ever = ever;
   const hasCode = rf ? !!r[extra.ref] : false;
   u.refCode = rf && r[extra.ref] ? String(r[extra.ref]) : null;
   u.points = { parts: { Trading: Math.round(volume), Vault: Math.round(vaultPts) } };

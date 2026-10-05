@@ -206,9 +206,9 @@ const Engine = {
       { ico: "bolt", name: "Max power", desc: "Open a 10× position", got: u.maxLev >= 10 }] : []),
       { ico: "waves", name: "Whale", desc: "Trade $10K volume", got: u.volume >= 10000 },
       { ico: "blocks", name: "Market maker", desc: "Create a market", got: created >= 1 },
-      { ico: "vault", name: "Liquidity provider", desc: "Deposit into the vault", got: u.deposits.length >= 1 },
-      { ico: "diamond", name: "Diamond hands", desc: "Lock in the vault for 365 days", got: u.deposits.some(d => d.lock === "d365") },
-      { ico: "shield", name: "Guardian", desc: "Stake and vote on a resolution", got: Object.keys(u.votes || {}).length >= 1 },
+      { ico: "vault", name: "Liquidity provider", desc: "Deposit into the vault", got: u.ever ? u.ever.deposited : u.deposits.length >= 1 },
+      { ico: "diamond", name: "Diamond hands", desc: "Lock in the vault for 365 days", got: u.ever ? u.ever.diamond : u.deposits.some(d => d.lock === "d365") },
+      { ico: "shield", name: "Guardian", desc: "Stake and vote on a resolution", got: u.ever ? u.ever.voted : Object.keys(u.votes || {}).length >= 1 },
       { ico: "link", name: "Connector", desc: "Create your referral link", got: hasCode }
     ];
   }

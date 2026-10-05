@@ -954,14 +954,16 @@ async function route(keepScroll){
   const LOAD_TEXT = { home: "Loading markets…", markets: "Loading markets…", market: "Loading market…", portfolio: "Loading your portfolio…",
     vault: "Loading the vault…", stake: "Loading staking…", resolve: "Loading results…", leaderboard: "Loading the leaderboard…",
     affiliate: "Loading your rewards…", rewards: "Loading your points…", admin: "Checking safety settings…", analytics: "Crunching the numbers…" };
-  const loadT = keepScroll ? null : setTimeout(() => { if(seq === routeSeq){ app.innerHTML = `<section class="page-head"><div class="wrap">${loader(LOAD_TEXT[r] || "Loading…")}</div></section>`; } }, 180);
+  const loadT = keepScroll ? null : setTimeout(() => { if(seq === routeSeq){ document.body.classList.add("page-loading"); app.innerHTML = `<section class="page-head"><div class="wrap">${loader(LOAD_TEXT[r] || "Loading…")}</div></section>`; } }, 180);
   let html;
   try{ html = await PAGES[r](r === "market" ? param : query, query); }
   catch(e){ console.error(e); html = `<section class="page-head"><div class="wrap"><div class="panel empty">Something went wrong: ${esc(e.message)}<br><a class="btn btn-ghost" href="#/">Go home</a></div></div></section>`; }
   clearTimeout(loadT);
   if(seq !== routeSeq) return;                  // user moved on while this page was loading
+  document.body.classList.remove("page-loading");
   app.innerHTML = html;
   afterRender(r);
+  hideSplash();
   if(!keepScroll) window.scrollTo({ top: 0 });
 }
 function afterRender(r){
@@ -996,7 +998,13 @@ async function busy(btn, label, fn){
 }
 const ACTIONS = {
   noop(){},
-  connect(){ closeDrawer(); return wallet.connect(); },
+  async connect(el){
+    closeDrawer();
+    const old = el?.innerHTML;
+    if(el){ el.disabled = true; el.innerHTML = `<span class="xl-ring" aria-hidden="true"></span>Connecting…`; }
+    try{ await wallet.connect(); }
+    finally{ if(el && document.body.contains(el)){ el.disabled = false; el.innerHTML = old; } }
+  },
   drawerOpen(){ openDrawer(); },
   drawerClose(){ closeDrawer(); },
   disconnect(){ closeDrawer(); ACC = null; wallet.disconnect(); },
@@ -1151,6 +1159,14 @@ document.addEventListener("click", e => {
 });
 document.addEventListener("input", e => { if(e.target.id === "amt" && tState.m){ tState.margin = Math.max(0, +e.target.value || 0); updateQuote(); } });
 window.addEventListener("hashchange", () => route());
+
+// full-screen 369X splash: shown from the first paint until the first page is ready
+function hideSplash(){
+  const s = $("#splash"); if(!s || s.classList.contains("out")) return;
+  s.classList.add("out"); document.body.classList.remove("booting");
+  setTimeout(() => s.remove(), 600);
+}
+setTimeout(hideSplash, 15000);                  // never leave people staring at it
 
 (async function start(){
   captureRef();

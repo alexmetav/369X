@@ -15,8 +15,16 @@
 <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;500;600;700&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/styles.css">
 </head>
-<body>
+<body class="booting">
 <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs><linearGradient id="ig369" gradientUnits="userSpaceOnUse" x1="2" y1="2" x2="22" y2="22"><stop offset="0" stop-color="#7cf26a"/><stop offset=".5" stop-color="#6fe6c0"/><stop offset="1" stop-color="#5fd6f2"/></linearGradient></defs></svg>
+<div id="splash" class="splash" role="status" aria-live="polite">
+  <div class="splash-glow" aria-hidden="true"></div>
+  <div class="splash-in">
+    <div class="xl-logo splash-logo"><img src="assets/logo.png" alt="369X" width="220" height="90"><i class="xl-shine" aria-hidden="true"></i></div>
+    <div class="xl-bar" aria-hidden="true"><i></i></div>
+    <p class="xl-text">Loading 369X…</p>
+  </div>
+</div>
 <div class="glow a"></div><div class="glow b"></div>
 
 <div id="demoBanner"></div>
@@ -49,7 +57,7 @@
 </header>
 <div class="drawer-wrap" id="drawerWrap" hidden><div class="drawer-scrim" data-act="drawerClose"></div><aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-label="Menu"></aside></div>
 
-<main id="app"><div class="xl" role="status" aria-live="polite"><div class="xl-logo"><img src="assets/logo.png" alt="" width="160" height="66"><i class="xl-shine" aria-hidden="true"></i></div><div class="xl-bar" aria-hidden="true"><i></i></div><p class="xl-text">Loading 369X…</p></div></main>
+<main id="app"></main>
 
 <footer>
   <div class="wrap foot">

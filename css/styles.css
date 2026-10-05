@@ -582,3 +582,19 @@ td > a .ic,td .ic{margin-right:4px}
 /* hero chips sit in the free space above / below the card so they never cover it */
 .fc1{top:2%;left:2%}
 .fc2{bottom:2%;right:2%}
+
+/* full-screen splash (first load) */
+body.booting{overflow:hidden}
+.splash{position:fixed;inset:0;z-index:100;display:grid;place-items:center;background:#030405;transition:opacity .45s ease,visibility .45s}
+.splash-glow{position:absolute;width:min(560px,90vw);aspect-ratio:1;border-radius:50%;
+  background:radial-gradient(circle,rgba(124,242,106,.16) 0%,rgba(95,214,242,.08) 38%,transparent 68%);filter:blur(10px);animation:sp-glow 2.8s ease-in-out infinite}
+.splash-in{position:relative;display:flex;flex-direction:column;align-items:center;gap:22px;animation:sp-in .7s cubic-bezier(.2,.8,.2,1) both}
+.splash .splash-logo{width:220px;height:90px}
+.splash .xl-bar{width:160px}
+.splash.out{opacity:0;visibility:hidden}
+.splash.out .splash-in{transform:scale(1.04);transition:transform .45s ease}
+@keyframes sp-in{from{opacity:0;transform:translateY(10px) scale(.94);filter:blur(6px)}to{opacity:1;transform:none;filter:none}}
+@keyframes sp-glow{0%,100%{transform:scale(.92);opacity:.75}50%{transform:scale(1.06);opacity:1}}
+@media (max-width:480px){.splash .splash-logo{width:170px;height:70px}}
+/* while a page loads, keep the footer out of the way */
+body.page-loading footer{display:none}

@@ -1,0 +1,29 @@
+# Refreshes data/chain-snapshot.json so new visitors load the site fast.
+# Each run that finds new events commits to main, which means one Vercel deploy.
+name: Chain history snapshot
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "17 3 * * 1"        # Mondays 03:17 UTC
+permissions:
+  contents: write
+concurrency: chain-snapshot
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --no-save --no-package-lock ethers@6
+      - run: node scripts/chain-snapshot.js
+      - name: Commit if changed
+        run: |
+          if git diff --quiet -- data/chain-snapshot.json && git ls-files --error-unmatch data/chain-snapshot.json >/dev/null 2>&1; then echo "no change"; exit 0; fi
+          git config user.name "369x-snapshot-bot"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/chain-snapshot.json
+          git commit -m "Refresh chain history snapshot"
+          git push

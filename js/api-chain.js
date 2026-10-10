@@ -34,10 +34,7 @@ const MARKET_ABI = [
   "function defaultB() view returns (int256)",
   "function fundReserve(uint256)",
   "function setBondAmount(uint256)",
-  "event Trade(uint256 indexed id, address indexed user, bool yes, bool buy, uint256 shares, uint256 amount, uint256 fee, uint256 priceYes)",
-  "event MarketCreated(uint256 indexed id, address indexed creator, string question, uint64 endTime, uint256 pYes, int256 b)",
-  "event Resolved(uint256 indexed id, bool outcomeYes, bool bondSlashed)",
-  "event Redeemed(uint256 indexed id, address indexed user, uint256 amount)"
+  ...CHAIN_EVENTS.MARKET_EVENTS
 ];
 
 const VAULT_ABI = [
@@ -93,8 +90,7 @@ const REFERRAL_ABI = [
   "function totalPublished() view returns (uint256)",
   "function totalClaimed() view returns (uint256)",
   "function pool() view returns (uint256)",
-  "event CodeRegistered(address indexed user, string code)",
-  "event ReferrerSet(address indexed user, address indexed referrer, string code)"
+  ...CHAIN_EVENTS.REFERRAL_EVENTS
 ];
 // vault + staking from before the v2 upgrade: people can still withdraw from them
 const OLD = () => CONFIG.CONTRACTS_OLD || {};
@@ -103,8 +99,7 @@ const LOCK_IDS = ["flex", "d90", "d180", "d365"];
 const MULTICALL = "0xcA11bde05977b3631167028862bE2a173976CA11";   // Multicall3: same address on almost every EVM chain
 const MC_ABI = ["function aggregate3((address target,bool allowFailure,bytes callData)[] calls) payable returns ((bool success,bytes returnData)[] returnData)"];
 const CONFIRMATIONS = CONFIG.CONFIRMATIONS || 12;                   // blocks before an event is saved for good
-const EVENTS_CACHE = "v3";
-REFERRAL_ABI.push("event RewardsPublished(bytes32 root, uint64 snapshotBlock, uint256 total)");
+const EVENTS_CACHE = CHAIN_EVENTS.VERSION;
 
 // run async tasks a few at a time (public RPCs rate-limit bursts)
 async function pool(tasks, n = 6){
@@ -206,6 +201,14 @@ const Chain = {
     while(lo < hi){ const mid = Math.floor((lo + hi) / 2); if((await p.getCode(CONFIG.CONTRACTS.market, mid)) === "0x") lo = mid + 1; else hi = mid; }
     store.set(key, lo); return lo;
   },
+  // published history snapshot for these contracts, or null (fetched once per page load)
+  snapshot(){
+    if(Chain._snap === undefined) Chain._snap = fetch("data/chain-snapshot.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null).then(s => {
+      const C = CONFIG.CONTRACTS, same = (a, b) => (a || "-").toLowerCase() === (b || "-").toLowerCase();
+      return s && s.v === EVENTS_CACHE && same(s.market, C.market) && same(s.referral, C.referral) && Number.isInteger(s.from) && Array.isArray(s.ev) ? s : null;
+    }).catch(() => null);
+    return Chain._snap;
+  },
   async scan(){
     if(Chain.data && Date.now() - Chain.data.at < 12000) return Chain.data;
     if(!Chain.scanning) Chain.scanning = Chain._scan().then(d => (Chain.data = d)).finally(() => { Chain.scanning = null; });
@@ -217,35 +220,31 @@ const Chain = {
     // drop caches from older app versions or old contracts
     try{ Object.keys(localStorage).filter(k => k.startsWith(store.pre + "chain:") && !k.includes("deployBlock") && k !== store.pre + key).forEach(k => localStorage.removeItem(k)); }catch(e){}
     let cache = store.get(key, null);
-    if(!cache || !Number.isInteger(cache.from) || !Array.isArray(cache.ev)) cache = { from: await Chain.retry(async () => Chain.deployBlock(await Chain.readProvider())), ev: [] };
-    const mi = new ethers.Interface(MARKET_ABI), ri = new ethers.Interface(REFERRAL_ABI);
-    const parse = (l) => {
-      const isRef = C.referral && l.address.toLowerCase() === C.referral.toLowerCase();
-      let ev = null; try{ ev = (isRef ? ri : mi).parseLog(l); }catch(e){}
-      if(!ev) return null;
-      const a = ev.args, base = { b: l.blockNumber, i: l.index };
-      switch(ev.name){
-        case "Trade": return { ...base, k: "t", id: Number(a.id), u: a.user.toLowerCase(), y: a.yes ? 1 : 0, by: a.buy ? 1 : 0, s: a.shares.toString(), a: a.amount.toString(), f: a.fee.toString(), p: a.priceYes.toString() };
-        case "MarketCreated": return { ...base, k: "c", id: Number(a.id), u: a.creator.toLowerCase(), p: a.pYes.toString() };
-        case "Resolved": return { ...base, k: "s", id: Number(a.id), y: a.outcomeYes ? 1 : 0 };
-        case "Redeemed": return { ...base, k: "d", id: Number(a.id), u: a.user.toLowerCase(), a: a.amount.toString() };
-        case "ReferrerSet": return { ...base, k: "r", u: a.user.toLowerCase(), r: a.referrer.toLowerCase() };
-        case "RewardsPublished": return { ...base, k: "p", root: a.root, snap: Number(a.snapshotBlock) };
+    if(!cache || !Number.isInteger(cache.from) || !Array.isArray(cache.ev)) cache = null;
+    // a published snapshot (data/chain-snapshot.json) saves new visitors from scanning the whole history
+    const snap = await Chain.snapshot();
+    if(snap && (!cache || snap.from > cache.from)) cache = { from: snap.from, ev: snap.ev.slice(), t0: snap.t0 };
+    if(!cache) cache = { from: await Chain.retry(async () => Chain.deployBlock(await Chain.readProvider())), ev: [] };
+    const parse = CHAIN_EVENTS.makeParser(ethers, C.referral);
+    // a block-range refusal is passed straight back (scanLogs splits the range); other failures retry on the next RPC
+    const getLogs = async (f, t) => {
+      const q = { address: addrs, fromBlock: f, toBlock: t };
+      try{ return await (await Chain.readProvider()).getLogs(q); }
+      catch(e){
+        if(/range|limit|exceed|too (many|large)|results/i.test(e?.error?.message || e?.shortMessage || e?.message || "")) throw e;
+        return Chain.retry(async () => (await Chain.readProvider()).getLogs(q), 2);
       }
-      return null;
     };
-    const getLogs = (f, t) => Chain.retry(async () => (await Chain.readProvider()).getLogs({ address: addrs, fromBlock: f, toBlock: t }));
     const latest = await Chain.retry(async () => (await Chain.readProvider()).getBlockNumber());
     const confirmed = Math.max(cache.from - 1, latest - CONFIRMATIONS);
-    const STEP = 5000, ranges = [];
-    for(let b = cache.from; b <= confirmed; b += STEP) ranges.push([b, Math.min(confirmed, b + STEP - 1)]);
-    for(let i = 0; i < ranges.length; i += 4){
-      const batch = ranges.slice(i, i + 4);
-      (await Promise.all(batch.map(([f, t]) => getLogs(f, t)))).flat().forEach(l => { const e = parse(l); if(e) cache.ev.push(e); });
-      cache.from = batch[batch.length - 1][1] + 1;
-      if(!store.set(key, cache)) Chain.cacheFull = true;     // keeps working, just rescans more next visit
-    }
-    if(!ranges.length) store.set(key, cache);
+    if(cache.from <= confirmed){
+      const r = await CHAIN_EVENTS.scanLogs(getLogs, cache.from, confirmed, { step: store.get("chain:logStep", 50000), onBatch: (logs, last) => {
+        logs.forEach(l => { const e = parse(l); if(e) cache.ev.push(e); });
+        cache.from = last + 1;
+        if(!store.set(key, cache)) Chain.cacheFull = true;     // keeps working, just rescans more next visit
+      } });
+      store.set("chain:logStep", r.step);                    // remember the range this RPC accepts
+    } else store.set(key, cache);
     // the newest few blocks are fetched fresh every time and never saved (they could still change)
     const tail = confirmed < latest ? (await getLogs(confirmed + 1, latest)).map(parse).filter(Boolean) : [];
     // block -> time: exact at the first scanned block and at the latest one, linear in between

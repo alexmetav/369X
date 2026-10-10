@@ -22,8 +22,8 @@ const CONFIG = {
   TOKEN: "369X",                    // ticker of your token, shown as $369X
   STABLE: "USDT",                   // the stablecoin people trade with
   SOCIAL: {
-    x: "https://x.com/",            // TODO: your X (Twitter) page
-    telegram: "https://t.me/",      // TODO: your Telegram group
+    x: "https://x.com/x369official",
+    telegram: "https://t.me/x369official",
     discord: ""                     // optional
   },
 
@@ -88,11 +88,12 @@ const CONFIG = {
   VAULT_APY_HINT: 0.142,            // shown as an estimate in demo mode
 
   // ---- staking tiers (staked $369X -> fee discount) ------------------
+  // discount applies to the protocol share of the fee only (litepaper v1.2)
   STAKE_TIERS: [
-    { name: "None",    min: 0,      discount: 0 },
-    { name: "Bronze",  min: 10000,  discount: 0.10 },
-    { name: "Silver",  min: 50000,  discount: 0.25 },
-    { name: "Gold",    min: 200000, discount: 0.50 }
+    { name: "Holder",          min: 0,      discount: 0 },
+    { name: "Staker",          min: 1000,   discount: 0.10 },
+    { name: "Power Staker",    min: 10000,  discount: 0.25 },
+    { name: "Protocol Staker", min: 100000, discount: 0.50 }
   ],
 
   // ---- referral commission tiers (share of fees from your invites) ---
@@ -103,16 +104,33 @@ const CONFIG = {
     { name: "Legend",  min: 500000, rate: 0.35 }
   ],
 
-  // ---- token page (PLACEHOLDER numbers, replace with your real plan) --
+  // ---- token page (litepaper v1.2: indicative design, final terms at TGE) --
   TOKEN_ADDRESS: "0x822a5E3Ee4901694124F2aB35C695EA6c9219721",   // test $369X on BSC Testnet
-  TOKEN_SUPPLY: 3690000000,
+  TOKEN_SUPPLY: 369000000,          // hard cap, no mint function
+  TOKEN_TGE_PCT: 7.26,              // available at TGE: sale tokens + deployed liquidity only
+  TOKEN_LISTING: 0.30,              // listing target, USD
+  TOKEN_SCHEDULE_MONTHS: 72,
+  // [bucket, % of supply, colour, unlock schedule]
   TOKEN_ALLOCATION: [
-    ["Community airdrop", 10, "#7cf26a"],
-    ["Liquidity mining",  20, "#6fe6c0"],
-    ["Ecosystem & grants", 18, "#5fd6f2"],
-    ["Treasury",          12, "#4a9be0"],
-    ["Team (4y vesting)", 15, "#8f7cf2"],
-    ["Investors",         15, "#c77cf2"],
-    ["Exchange liquidity", 10, "#ff7a88"]
-  ]
+    ["Ecosystem & Community Incentives", 18, "#7cf26a", "3-mo cliff · monthly to M60 · incl. 6% capped Compensation-Plan rewards"],
+    ["ICO / Public Sale (incl. Founders)", 15, "#5fd6f2", "Tiered by phase: 10% / 20% / 30% at TGE"],
+    ["Treasury / Foundation",            15, "#2fbf8f", "18-mo cliff · monthly to M66 · multisig"],
+    ["Staking & Resolver Rewards",       12, "#6fe6c0", "Shared cap · monthly from TGE to M72 (≈615K/mo)"],
+    ["Team & Advisors",                  12, "#8f7cf2", "12-mo cliff · monthly to M48"],
+    ["Liquidity & Market Making",         8, "#b5f05a", "15M deployed at TGE · rest reserved for new listings"],
+    ["Strategic Partners",                5, "#b9a4ff", "18-mo cliff · monthly to M42"],
+    ["Security & Insurance Reserve",      5, "#55606a", "Locked · released only by governance"],
+    ["Marketing & KOL",                   4, "#3fa7c9", "3-mo cliff · monthly to M27"],
+    ["Exchange Launch & Listing",         3, "#c6f7e2", "Locked · used only for confirmed listing campaigns"],
+    ["Launchpad Rewards",                 2, "#1f8f6a", "Hard-capped pool · 1-mo cliff · monthly to M25"],
+    ["Testnet Airdrop",                   1, "#e9ffd9", "1-mo cliff · monthly to M7"]
+  ],
+  // token sale ladder: [stage, price, tokens, TGE unlock · cliff · monthly]
+  TOKEN_SALE: [
+    ["ICO Phase 1 (incl. Founders)", 0.10, 15000000, "10% · 3-mo cliff · 15 mo"],
+    ["ICO Phase 2",                  0.15, 18000000, "20% · 2-mo cliff · 12 mo"],
+    ["ICO Phase 3",                  0.20, 22350000, "30% · 1-mo cliff · 9 mo"]
+  ],
+  // mainnet fee design: 2% base on every buy and sell, split four ways
+  FEE_PLAN: { protocol: 0.0085, creator: 0.005, depth: 0.004, lp: 0.0025, buyback: 0.30 }
 };

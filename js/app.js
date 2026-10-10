@@ -730,30 +730,73 @@ async function pageAffiliate(){
 
 /* ---------- token ---------- */
 async function pageToken(){
-  const alloc = CONFIG.TOKEN_ALLOCATION, R = 70, C = 2 * Math.PI * R; let off = 0;
-  const arcs = alloc.map(([, p, c]) => { const len = C * p / 100, s = `<circle cx="100" cy="100" r="${R}" fill="none" stroke="${c}" stroke-width="26" stroke-dasharray="${len - 2} ${C - len + 2}" stroke-dashoffset="${-off}"/>`; off += len; return s; }).join("");
+  const alloc = CONFIG.TOKEN_ALLOCATION, sup = CONFIG.TOKEN_SUPPLY, R = 70, C = 2 * Math.PI * R; let off = 0;
+  const arcs = alloc.map(([, p, c]) => { const len = C * p / 100, s = `<circle cx="100" cy="100" r="${R}" fill="none" stroke="${c}" stroke-width="26" stroke-dasharray="${Math.max(0.5, len - 1.5)} ${C - len + 1.5}" stroke-dashoffset="${-off}"/>`; off += len; return s; }).join("");
+  const drop = alloc.find(x => /airdrop/i.test(x[0])) || alloc[alloc.length - 1];
+  const group = re => alloc.filter(x => re.test(x[0])).reduce((t, x) => t + x[1], 0);
+  const F = CONFIG.FEE_PLAN, base = F.protocol + F.creator + F.depth + F.lp, P2 = v => (v * 100).toFixed(2).replace(/0$/, "") + "%";
+  const M = v => +(v / 1e6).toFixed(2) + "M";   // 55350000 -> 55.35M, 369000000 -> 369M
+  const sale = CONFIG.TOKEN_SALE, saleTok = sale.reduce((t, x) => t + x[2], 0), saleUsd = sale.reduce((t, x) => t + x[1] * x[2], 0);
+  const util = [
+    ["shield", "Resolution staking", "Stake to affirm or dispute outcomes. Honest resolvers earn; dishonest ones are slashed."],
+    ["tag", "Fee discounts", `Up to ${pct(CONFIG.STAKE_TIERS[CONFIG.STAKE_TIERS.length - 1].discount)} off the ${P2(F.protocol)} protocol fee for top-tier protocol stakers.`],
+    ["ballot", "Governance", "Vote on fees, supported markets, treasury, oracle integrations and the resolver set."],
+    ["sprout", "Liquidity mining", `Market makers and genuine active traders earn ${T()} for depth and real volume.`],
+    ["blocks", "Market creation & listing", `A small refundable ${T()} bond to create or list a market: a spam filter, not a tax.`],
+    ["rocket", "Leverage & premium access", "Priority access, higher tiers and perks for holders across leverage and futures products."]
+  ];
   return `<section class="page-head"><div class="wrap">
-    ${head(T(), `The utility and governance token of ${CONFIG.SITE_NAME}.`)}
+    ${head(T(), `A token earned by the people who predict. The utility and governance token of ${CONFIG.SITE_NAME}.`)}
+    <div class="info" style="margin-top:0;margin-bottom:16px;display:flex;gap:10px;align-items:flex-start">${ic("shield", "g")}<span>On testnet, ${T()} is a <b style="color:var(--text)">free test token with no value</b>. The figures below are the planned mainnet design from the litepaper (v1.2): indicative, subject to final terms at the Token Generation Event (TGE), and not a promise of price or returns.</span></div>
     <div class="stat-grid">
-      <div class="panel stat"><small>Total supply</small><b class="num">${compactN(CONFIG.TOKEN_SUPPLY)}</b></div>
-      <div class="panel stat"><small>Network</small><b>BNB Chain</b><em>BEP-20</em></div>
-      <div class="panel stat"><small>Contract</small><b style="font-size:16px">${CONFIG.TOKEN_ADDRESS ? `<button data-act="copy" data-v="${esc(CONFIG.TOKEN_ADDRESS)}">${esc(short(CONFIG.TOKEN_ADDRESS))}</button>` : "Coming soon"}</b></div>
-      <div class="panel stat"><small>Airdrop</small><b class="num">${alloc[0][1]}%</b><em>for testnet users</em></div>
+      <div class="panel stat"><small>Total supply</small><b class="num">${M(sup)}</b><em>Hard cap · no mint</em></div>
+      <div class="panel stat"><small>Standard</small><b>BEP-20</b><em>BNB Smart Chain</em></div>
+      <div class="panel stat"><small>Available at TGE</small><b class="num">≈${CONFIG.TOKEN_TGE_PCT}%</b><em>Sale + liquidity only</em></div>
+      <div class="panel stat"><small>Testnet airdrop</small><b class="num">${drop[1]}%</b><em>${M(sup * drop[1] / 100)} ${T()} · ${esc(drop[3].split(" · ")[0])}</em></div>
     </div>
-    <div class="two">
-      <div class="panel pad"><h2 class="h3">Allocation</h2><div class="donut-wrap" style="margin-top:16px">
-        <svg viewBox="0 0 200 200" style="transform:rotate(-90deg)">${arcs}</svg>
-        <div class="legend">${alloc.map(([n, p, c]) => `<div><i style="background:${c}"></i>${esc(n)}<b class="num">${p}%</b></div>`).join("")}</div></div>
-        <p class="side-note">Placeholder numbers. Final tokenomics will be published before launch.</p></div>
-      <div class="panel pad"><h2 class="h3">What ${T()} does</h2><div class="feed" style="margin-top:8px">
-        ${CHAIN_ON ? `<div><span>${ic("coins", "g")}Staking: share of protocol fees</span><b>${pct(1 - CONFIG.LP_SHARE)}, in ${S()}</b></div><div><span>${ic("shield", "g")}Resolution voting</span><b>1 token = 1 vote</b></div>
-        <div><span>${ic("blocks", "g")}Market creation bond</span><b>${num(CONFIG.CREATE_BOND)} ${T()}</b></div><div><span>${ic("tag", "g")}Fee discounts</span><b class="muted">Planned</b></div>
-        <div><span>${ic("ballot", "g")}Governance</span><b class="muted">Planned</b></div></div>
-        <p class="side-note">This is a free test token on BNB testnet. It has no value.</p></div>`
-        : `<div><span>${ic("tag", "g")}Fee discounts</span><b>Up to 50% off</b></div><div><span>${ic("shield", "g")}Resolution voting</span><b>Earn rewards</b></div>
-        <div><span>${ic("blocks", "g")}Market creation bond</span><b>${num(CONFIG.CREATE_BOND)} ${T()}</b></div><div><span>${ic("ballot", "g")}Governance</span><b>Vote on fees & listings</b></div>
-        <div><span>${ic("sprout", "g")}Liquidity mining</span><b>Vault rewards</b></div></div></div>`}
+
+    <div class="panel pad" style="margin-top:16px"><div class="tk-head"><h2 class="h3">Supply & allocation</h2><div class="tk-chips"><span><b class="num">${group(/Ecosystem|ICO|Staking|Liquidity|Launchpad|Airdrop|Exchange/)}%</b> users, buyers & liquidity</span><span><b class="num">${group(/Treasury|Security/)}%</b> treasury & reserves</span><span><b class="num">${group(/Team|Strategic/)}%</b> team & strategic</span><span><b class="num">${group(/Marketing/)}%</b> marketing</span></div></div>
+      <div class="tk-alloc">
+        <div class="tk-donut"><svg viewBox="0 0 200 200" style="transform:rotate(-90deg)">${arcs}</svg><div><b class="num">${M(sup)}</b><small>${T()} fixed supply</small></div></div>
+        <div class="scroll-x"><table class="table tk-table"><thead><tr><th>Bucket</th><th class="r">Share</th><th class="r">Tokens</th><th>Unlock schedule</th></tr></thead>
+          <tbody>${alloc.map(([n, p, c, u]) => `<tr><td><i class="sw" style="background:${c}"></i>${esc(n)}</td><td class="r num">${p}%</td><td class="r num">${M(sup * p / 100)}</td><td class="muted">${esc(u)}</td></tr>`).join("")}</tbody></table></div>
+      </div>
+      <p class="side-note">Only sale tokens and trading liquidity unlock at TGE. Cliffs are staggered (team 12 months; treasury and strategic 18 months) so no single month carries a large unlock. Longest schedule: ${CONFIG.TOKEN_SCHEDULE_MONTHS} months.</p></div>
+
+    <h2 class="h3" style="margin:28px 0 12px">What ${T()} does</h2>
+    <div class="tk-grid">${util.map(([i, t, d]) => `<div class="panel pad"><span class="tk-ic">${ic(i, "g")}</span><h3>${t}</h3><p>${d}</p></div>`).join("")}</div>
+    <div class="info">You don't need ${T()} to trade: markets settle in USD stablecoins. The token adds rewards, protocol-fee discounts, governance, mining eligibility, market creation and premium access.</div>
+
+    <div class="two" style="margin-top:28px">
+      <div class="panel pad"><h2 class="h3">Fee split (mainnet design)</h2>
+        <p class="muted" style="margin-top:6px;font-size:14px">One ${P2(base)} base fee on every buy and sell; ${P2(1 - base)} buys your position.</p>
+        <div class="feebar">${[["Protocol", F.protocol, "#7cf26a"], ["Creator", F.creator, "#8f7cf2"], ["Depth", F.depth, "#5fd6f2"], ["LP yield", F.lp, "#2fbf8f"]].map(([n, v, c]) => `<i style="flex:${v * 1000} 1 0;background:${c}">${P2(v)}</i>`).join("")}</div>
+        <div class="feed" style="margin-top:12px">
+          <div><span>Protocol: FeeVault → operations, treasury & ${T()} buyback</span><b class="num">${P2(F.protocol)}</b></div>
+          <div><span>Creator: the approved market creator, for the market's life</span><b class="num">${P2(F.creator)}</b></div>
+          <div><span>Depth: stays in the market to deepen liquidity</span><b class="num">${P2(F.depth)}</b></div>
+          <div><span>LP yield: paid to LP Vault depositors</span><b class="num">${P2(F.lp)}</b></div></div>
+        <p class="side-note">Staker discounts apply only to the protocol share; creator, depth and LP shares are never reduced. Testnet contracts currently charge ${pct(CONFIG.CREATOR_FEE + CONFIG.PROTOCOL_FEE, 1)} (see Docs → Fees).</p></div>
+      <div class="panel pad"><h2 class="h3">Buyback & burn</h2>
+        <div class="tk-steps">
+          <div><small>Step 1</small><b>Trades pay fees</b><p>The ${P2(F.protocol)} protocol fee on every trade flows to the FeeVault.</p></div>
+          <div><small>Step 2</small><b>${pct(F.buyback)} buys ${T()}</b><p>Executed gradually (TWAP) on the open market to avoid spikes and front-running.</p></div>
+          <div><small>Step 3a</small><b class="neg">50% burned</b><p>Sent to a dead address, permanently removed from the ${M(sup)} supply.</p></div>
+          <div><small>Step 3b</small><b class="pos">50% to stakers</b><p>Funds protocol staking rewards for ${T()} holders.</p></div></div>
+        <p class="side-note">${pct(F.buyback)} is the initial parameter, DAO-adjustable within 10–50% via a 48-hour timelock. Circulating supply can still grow through scheduled unlocks.</p></div>
     </div>
+
+    <h2 class="h3" style="margin:28px 0 12px">Protocol staking tiers</h2>
+    <div class="tk-grid four">${CONFIG.STAKE_TIERS.map((t, i) => `<div class="panel pad ${i === CONFIG.STAKE_TIERS.length - 1 ? "hl" : ""}"><small class="muted">TIER 0${i + 1}</small><h3>${esc(t.name)}</h3><small class="muted">${T()} REQUIRED</small><b class="num tk-big">${t.min ? num(t.min) + "+" : "0"}</b><small class="muted">OFF THE PROTOCOL FEE</small><b class="num tk-big pos">${pct(t.discount)}</b></div>`).join("")}</div>
+    <p class="side-note">Open to every ${T()} holder after TGE: a share of buyback rewards, a discount on the ${P2(F.protocol)} protocol fee and governance voting power. No lock-up to stake · 7-day cooldown to unstake. Rewards come from buybacks plus the ${alloc.find(x => /Staking/.test(x[0]))[1]}% Staking & Resolver pool, never from a mint.</p>
+
+    <div class="panel" style="margin-top:28px"><div class="pad" style="padding-bottom:0"><h2 class="h3">Token sale: price ladder to listing</h2></div>
+      <div class="scroll-x"><table class="table" style="margin-top:8px"><thead><tr><th>Stage</th><th class="r">Price</th><th class="r">Tokens</th><th class="r">Raise</th><th class="r">vs listing</th><th>Unlock (TGE · cliff · monthly)</th></tr></thead>
+        <tbody>${sale.map(([n, p, k, u]) => `<tr><td>${esc(n)}</td><td class="r num">$${p.toFixed(2)}</td><td class="r num">${M(k)}</td><td class="r num">${money(p * k)}</td><td class="r num">${((p / CONFIG.TOKEN_LISTING - 1) * 100).toFixed(1)}%</td><td class="muted">${esc(u)}</td></tr>`).join("")}
+        <tr><td><b>Total sale</b></td><td class="r">—</td><td class="r num"><b>${M(saleTok)}</b></td><td class="r num"><b>${money(saleUsd)}</b></td><td class="r">—</td><td class="muted">${Math.round(saleTok / sup * 100)}% of supply</td></tr></tbody></table></div>
+      <p class="side-note" style="padding:0 20px 18px">TGE listing target $${CONFIG.TOKEN_LISTING.toFixed(2)}. Phases open in order; unsold Phase 1–2 tokens move to the next phase at its price, and anything unsold after Phase 3 goes to the Treasury, locked on its schedule. Indicative and subject to final terms and applicable regulations; "vs listing" is the discount to the target, not a guaranteed return.</p></div>
+
+    <div class="tk-contract"><span class="muted">Test contract (BSC Testnet):</span> ${CONFIG.TOKEN_ADDRESS ? `<button class="num" data-act="copy" data-v="${esc(CONFIG.TOKEN_ADDRESS)}">${esc(short(CONFIG.TOKEN_ADDRESS))} ${ic("copy")}</button>` : "Coming soon"} <span class="muted">· Only trust addresses posted on our official <a href="${esc(CONFIG.SOCIAL.x)}" target="_blank" rel="noopener">X</a> and <a href="${esc(CONFIG.SOCIAL.telegram)}" target="_blank" rel="noopener">Telegram</a>.</span></div>
   </div></section>`;
 }
 
@@ -763,11 +806,14 @@ async function pageDocs(){
     ["start", "Getting started", `<p>1. Install a wallet app like MetaMask or Trust Wallet. 2. Click <b>Connect wallet</b>; we switch you to ${esc(CONFIG.CHAIN.chainName)} automatically. 3. Open the wallet menu and click <b>Get test funds</b> for ${num(CONFIG.FAUCET_STABLE)} test ${S()} and ${num(CONFIG.FAUCET_TOKEN)} test ${T()}. 4. Pick a market and buy YES or NO.</p>`],
     ["prices", "How prices work", `<p>Prices come from an automated market maker called <b>LMSR</b> (Logarithmic Market Scoring Rule). It always quotes a price, so you never wait for someone to take the other side. YES + NO always add up to $1. Buying YES pushes the YES price up; the size of the move depends on the market's liquidity depth.</p><p>The protocol's worst-case loss per market is capped at <code>b × ln 2</code>, where <code>b</code> is the liquidity setting. That makes it safe to seed every new market automatically.</p>`],
     ["leverage", "Leverage (coming soon)", `<p><b>Leverage is not live yet.</b> When it launches, it will let you open a bigger position than your deposit. At 5× a $100 deposit opens a $500 position; the extra $400 is borrowed from the vault.</p><ul><li>Available leverage depends on market volume: ${CONFIG.LEVERAGE_TIERS.map(([l, v]) => `${l}× from ${compact(v)}`).join(", ")}.</li><li>If your position's value minus the borrowed amount falls below ${pct(CONFIG.MAINTENANCE)} of its size, it is <b>liquidated</b> and you lose your deposit.</li><li>Positions from ${money(CONFIG.LEVERAGE_MIN)} to ${money(CONFIG.LEVERAGE_MAX)} at launch.</li><li>The liquidation price is shown before you trade.</li></ul><p><a href="#/leverage" style="color:var(--cyan)">Try the leverage simulator →</a></p>`],
-    ["fees", "Fees", `<p>Each trade pays ${pct(CONFIG.CREATOR_FEE + CONFIG.PROTOCOL_FEE, 1)} of its size: ${pct(CONFIG.CREATOR_FEE, 1)} to the market creator and ${pct(CONFIG.PROTOCOL_FEE, 1)} to the protocol. ${pct(CONFIG.LP_SHARE)} of the protocol fee goes to vault depositors${CHAIN_ON ? ` and the rest to ${T()} stakers. Invited users get ${pct(CONFIG.REF_DISCOUNT)} of their fees back as a rebate, and the person who invited them earns ${CONFIG.REF_TIERS.map(t => pct(t.rate)).join("/")} of the protocol fee (buys only; trades in your own or your referrer's markets don't count). Fee discounts for stakers are planned.</p>` : `. Staking ${T()} cuts fees by up to 50%, and invited users get ${pct(CONFIG.REF_DISCOUNT)} off.</p>`}`],
+    ["fees", "Fees", `<p>Each trade pays ${pct(CONFIG.CREATOR_FEE + CONFIG.PROTOCOL_FEE, 1)} of its size: ${pct(CONFIG.CREATOR_FEE, 1)} to the market creator and ${pct(CONFIG.PROTOCOL_FEE, 1)} to the protocol. ${pct(CONFIG.LP_SHARE)} of the protocol fee goes to vault depositors${CHAIN_ON ? ` and the rest to ${T()} stakers. Invited users get ${pct(CONFIG.REF_DISCOUNT)} of their fees back as a rebate, and the person who invited them earns ${CONFIG.REF_TIERS.map(t => pct(t.rate)).join("/")} of the protocol fee (buys only; trades in your own or your referrer's markets don't count). Fee discounts for stakers are planned.</p><p><b>Mainnet design (litepaper v1.2):</b> one ${pct(CONFIG.FEE_PLAN.protocol + CONFIG.FEE_PLAN.creator + CONFIG.FEE_PLAN.depth + CONFIG.FEE_PLAN.lp, 1)} base fee on every buy and sell, split ${(CONFIG.FEE_PLAN.protocol * 100).toFixed(2)}% protocol, ${(CONFIG.FEE_PLAN.creator * 100).toFixed(1)}% creator, ${(CONFIG.FEE_PLAN.depth * 100).toFixed(1)}% market depth and ${(CONFIG.FEE_PLAN.lp * 100).toFixed(2)}% LP yield. ${pct(CONFIG.FEE_PLAN.buyback)} of the protocol fee buys back ${T()}: half is burned, half goes to stakers. Staker discounts of up to 50% apply to the protocol share only. <a href="#/token" style="color:var(--cyan)">See the token page →</a></p>` : `. Staking ${T()} cuts fees by up to 50%, and invited users get ${pct(CONFIG.REF_DISCOUNT)} off.</p>`}`],
     ["create", "Creating markets", `<p>Anyone can create a market by posting a ${num(CONFIG.CREATE_BOND)} ${T()} bond. The protocol seeds the liquidity, so creators take no market-making risk and earn ${pct(CONFIG.CREATOR_FEE, 1)} of every trade for the life of the market. The bond comes back when the market resolves cleanly; unclear or abusive markets can lose it.</p>`],
     ["vault", "Vault", `<p>Vault depositors provide ${S()} liquidity to the protocol (and, once leverage launches, the money leveraged traders borrow). In return they earn ${pct(CONFIG.LP_SHARE)} of protocol fees. Choose a lock period: ${CONFIG.LOCKS.map(l => `${l.label} (${l.mult}× points)`).join(", ")}. Longer locks earn points faster.</p>`],
-    ["resolve", "Resolution", `<p>When a market ends it moves to <b>Resolving</b>. ${T()} stakers vote YES or NO based on the listed resolution source. Votes are weighted by stake. Voters on the final outcome earn rewards. ${CHAIN_ON ? "Once the result is final, open your Portfolio and press <b>Redeem</b>: each winning share pays $1." : "Winning shares then pay $1 each and positions settle automatically."}</p>`],
-    ["points", "Points & badges", `<p>Points track how much you use ${CONFIG.SITE_NAME}: trading, vault deposits, staking, creating markets, correct votes, referrals and badges. Points are planned to convert into ${T()} at launch; the exact formula will be announced. Points never go down from normal use. Fake or duplicate accounts (sybil farming, for example many wallets trading with each other) can be excluded from any airdrop.</p>`],
+    ["resolve", "Resolution", `<p>When a market ends it moves to <b>Resolving</b>. ${T()} stakers vote YES or NO based on the listed resolution source. Votes are weighted by stake. Voters on the final outcome earn rewards. ${CHAIN_ON ? "Once the result is final, open your Portfolio and press <b>Redeem</b>: each winning share pays $1." : "Winning shares then pay $1 each and positions settle automatically."}</p><p><b>Mainnet plan:</b> bonded resolution. A resolver proposes the outcome with a bond, anyone can dispute within 48 hours, and unchallenged outcomes finalise. Markets that can't be resolved are voided and you can reclaim what you paid for shares you still hold (trading fees and gas are not refunded).</p>`],
+    ["points", "Points & badges", `<p>Points track how much you use ${CONFIG.SITE_NAME}: trading, vault deposits, staking, creating markets, correct votes, referrals and badges. Points are planned to convert into ${T()} at launch from the Testnet Airdrop bucket (${CONFIG.TOKEN_ALLOCATION.find(x => /airdrop/i.test(x[0]))[1]}% of supply, ${compactN(CONFIG.TOKEN_SUPPLY * CONFIG.TOKEN_ALLOCATION.find(x => /airdrop/i.test(x[0]))[1] / 100)} ${T()}); the exact formula will be announced. Points never go down from normal use. Fake or duplicate accounts (sybil farming, for example many wallets trading with each other) can be excluded from any airdrop.</p>`],
+    ["token", `The ${T()} token`, `<p>${T()} is a BEP-20 token on BNB Smart Chain with a fixed supply of ${compactN(CONFIG.TOKEN_SUPPLY)} (hard cap, no mint). It is used for resolution staking, protocol-fee discounts, governance, liquidity mining, market creation bonds and premium access. You don't need it to trade: markets settle in USD stablecoins. On testnet it is a free test token with no value. Full allocation, unlocks, staking tiers and the sale ladder are on the <a href="#/token" style="color:var(--cyan)">token page</a>.</p>`],
+    ["roadmap", "Roadmap", `<ul><li><b>Now · Phase 0, testnet launch:</b> LMSR prediction markets, buy → resolve → claim with free test funds, leaderboard, badges and referrals, LP Vault preview (Flex/90/180/365), leverage simulator, early-user rewards and airdrop points.</li><li><b>Next 0–6 months, token & mainnet:</b> ICO Phases 1–3, third-party audit and re-audit with zero open criticals, BNB mainnet deploy with an Immunefi bug bounty, ${T()} TGE & listing with an airdrop claim portal, protocol staking, buyback & burn, 48-hour timelock governance, user market-listing portal and leverage on graduated markets.</li><li><b>6–12 months, scale & expand:</b> multi-outcome and scalar markets, futures-style probability perps, more EVM chains, a public API and embeddable widget, native iOS & Android apps, fiat on-ramps and more languages.</li></ul><p class="muted">Years 2–5 in the litepaper are strategic proposals, not committed delivery dates. Timelines depend on audits, regulation and adoption.</p>`],
+    ["community", "Official channels", `<p>Only trust these official channels, and verify contract addresses before interacting:</p><ul><li>X: <a href="${esc(CONFIG.SOCIAL.x)}" target="_blank" rel="noopener" style="color:var(--cyan)">@x369official</a></li><li>Telegram: <a href="${esc(CONFIG.SOCIAL.telegram)}" target="_blank" rel="noopener" style="color:var(--cyan)">t.me/x369official</a></li></ul>`],
     ["risks", "Risks", `<ul><li>You can lose everything you put into a trade, and leverage makes losses faster.</li><li>Smart contracts can have bugs.</li><li>Resolution relies on voters reading the source correctly.</li><li>Prediction markets may be restricted where you live. Check your local laws.</li></ul><p>Read the full <a href="#/legal" style="color:var(--cyan)">Terms, Privacy and Risk notice</a>.</p>`]
   ];
   return `<section class="page-head"><div class="wrap">
